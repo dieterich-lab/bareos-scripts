@@ -1,0 +1,17 @@
+.DS_Store
+.gitignore
+.gitignore~
+**/.DS_Store
+**/*.log
+**/*.pyc
+**/*.gz
+**/*.fasta
+**/*.fa
+**/*~
+.project
+.pythonproject
+.pydevproject
+.Rproj.user*
+.Rhistory
+.Rproj.user
+**
