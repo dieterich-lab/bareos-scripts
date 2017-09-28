@@ -145,6 +145,7 @@ class Find(object):
     def __init__(self, parser = {}, *args, **kwargs):
         atexit.register(self._cleanup)
         self._set_config(parser, args, kwargs)
+        self.main()
                 
     def _arg_parser(self, parser):
         """
@@ -446,13 +447,13 @@ class Find(object):
         """
         self.results = []
         _now = time.time()
-        for root, dirs, files in os.walk(self.startdir):
+        for root, dirs, files in os.walk(self.startdir, topdown=True):
             # Check depth RELATIVE TO root
             dir_depth = root.replace(self.startdir, "") # Remove relative root
             dir_depth = dir_depth.split(checks.directory_deliminator())
             dir_depth = [x for x in dir_depth if len(x) > 1]
             dir_depth = len(dir_depth) + 1 # Start at 1 not 0
-        
+
             if (dir_depth <= self.maxdepth) or (self.maxdepth == 0):
                 _dir_youngest_time = os.stat(root).st_mtime # Reset at each root loop
         
@@ -487,7 +488,7 @@ class Find(object):
                     if self.TERMINAL: print(_append)
                     if self._outfile is not None: self._outfile.write(str(_append) + "\n")
                     
-                    return self.results
+        return self.results
                 
     def main(self):
         """
@@ -514,4 +515,4 @@ class Find(object):
 if __name__ == '__main__':
     parser = ArgumentParser()
     object = Find(parser)
-    object.main()
+    # object.main()
