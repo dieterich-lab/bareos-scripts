@@ -15,7 +15,7 @@ from common.checks  import Checks
 checks = Checks()
 _delim = checks.directory_deliminator()
 # from common.confighandler  import ConfigHandler # Needs to be updated for Python3
-from common.loghandler               import log
+# from common.loghandler               import log
 from common.convert_timestring_input import convert_timestring_input as get_time 
 
 import atexit
@@ -228,10 +228,10 @@ class Find(object):
             if self.outfile is not None: self._outfile.close()
             #####################################################
             message += "OK"
-            log.info(message)
+            # log.info(message)
         except Exception as e:
             message += "FAILED ({E})".format(E = str(e))
-            log.error(message)
+            # log.error(message)
         
     def _set_config(self, parser, args, kwargs):
         """"""
@@ -277,14 +277,16 @@ class Find(object):
         #     self.CONF.set(key, value)
         #=======================================================================
                 
-        # Log something
-        log.debug("Running {C}.{M}...".format(C = self.app_name, M = inspect.stack()[0][3]), 
-                 app_name     = self.app_name, 
-                 logfile      = self.logfile, 
-                 log_level    = self.log_level, 
-                 screendump   = self.screendump, 
-                 create_paths = self.create_paths, 
-                 )
+        #=======================================================================
+        # # Log something
+        # log.debug("Running {C}.{M}...".format(C = self.app_name, M = inspect.stack()[0][3]), 
+        #          app_name     = self.app_name, 
+        #          logfile      = self.logfile, 
+        #          log_level    = self.log_level, 
+        #          screendump   = self.screendump, 
+        #          create_paths = self.create_paths, 
+        #          )
+        #=======================================================================
 
     @property
     def increment_readable(self):
@@ -330,9 +332,7 @@ class Find(object):
         except Exception as e:
             err = "The {A} ({V}) does not appear to exist or cannot be recognized. ".format(A = str(inspect.stack()[0][3]), V = str(value))
             raise ValueError(err)
-        
-        print("self.STARTDIR=", self.STARTDIR)
-        
+                
     @startdir.deleter
     def startdir(self):
         del self.STARTDIR
@@ -367,9 +367,6 @@ class Find(object):
         
     @outfile.setter
     def outfile(self, value):
-        print()
-        print()
-        print("outfile.value=", value)
 
         if "none" in str(value).lower():
             self.OUTFILE = None
@@ -465,7 +462,7 @@ class Find(object):
                         _time = os.stat(path).st_mtime # in epoch
                     except Exception as e:
                         message = "Error gathering mtime from path {P}. Skipping. (ERROR: {E})".format(P = path, E = str(e))
-                        log.error(message)
+                        # log.error(message)
                         self.results.append([message])
                         if self.TERMINAL: print(message)
                         if self._outfile is not None: self._outfile.write(str([message]) + "\n")
@@ -508,9 +505,9 @@ class Find(object):
             
         :RETURNS: A list of lists containing the same data as the text output.        
         """
-        log.debug("Running 'Find' with parameters: {D}".format(D = str(self.__dict__)))
+        # log.debug("Running 'Find' with parameters: {D}".format(D = str(self.__dict__)))
         _result = self.walkit()
-        log.debug("Done.")
+        # log.debug("Done.")
         return _result
         
     
