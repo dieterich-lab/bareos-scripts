@@ -36,14 +36,14 @@ class Find(object):
         The output can be dumped to the terminal, written to file, or both.
         
         Output is in the TEXT format (string not a list):
-        ["/full/path/to/dir/or/file", "Age", "Time label", "mtime in epoch"]
+        ["File/Dir", /full/path/to/dir/or/file", "Age", "Time label", "mtime in epoch"]
         E.g.
-        ['/Users/mikes/.thumbdata', 2276.97, 'Day(s)', 1309816010.0]
+        ["F", '/Users/mikes/.thumbdata', 2276.97, 'Day(s)', 1309816010.0]
         
         Output can be restricted to files (only), directories (only) or both. 
         NOTE: When directories(only) are output, the age is based on the 
               YOUNGEST file within the directory NOT the actual directory 
-              creation/mod date!
+              creation/modification date!
               
         The script can be run at the command line, using switches OR as a class, 
         passing in variables via the *args/**kwargs parameters. 
@@ -472,21 +472,32 @@ class Find(object):
                     _diff = _now - _time
                     # Set the directory time to the youngest file in the dir
                     if _time > _dir_youngest_time: _dir_youngest_time = _time
-                    # If it matches the input time rnge
+                    # If it matches the input time range
+
+                    #===========================================================
+                    # print()#333
+                    # print("==================") #333
+                    # print("_diff=", _diff) #3333
+                    # print("self.newer=", self.newer) #333
+                    # print("self.older=", self.older) #333
+                    # print("_diff is greater than self.older is", _diff >= self.older)
+                    #===========================================================
+                    
                     if ((_diff >= self.older) or (self.older == 0)) and ((_diff <= self.newer) or (self.newer == 0)):
                          # If individual file listings was set
                          if ("f" in self.FILETYPE.lower()) or ("b" in self.FILETYPE.lower()):
-                             _append = [path, get_time(int(_diff), self.INCREMENTOUT), self.increment_readable, _time]
+                             _append = ["F", path, get_time(int(_diff), self.INCREMENTOUT), self.increment_readable, _time]
                              self.results.append(_append)  
                              if self.TERMINAL: print(_append)
                              if self._outfile is not None: self._outfile.write(str(_append) + "\n")
                 # If directorys was set
-                if ("d" in self.FILETYPE.lower()) or ("b" in self.FILETYPE.lower()):
-                    _diff = _now - _dir_youngest_time
-                    _append = [root, get_time(int(_diff), self.INCREMENTOUT), self.increment_readable, _time]
-                    self.results.append(_append)  
-                    if self.TERMINAL: print(_append)
-                    if self._outfile is not None: self._outfile.write(str(_append) + "\n")
+                _diff = _now - _dir_youngest_time
+                if ((_diff >= self.older) or (self.older == 0)) and ((_diff <= self.newer) or (self.newer == 0)):
+                    if ("d" in self.FILETYPE.lower()) or ("b" in self.FILETYPE.lower()):                        
+                        _append = ["D", root, get_time(int(_diff), self.INCREMENTOUT), self.increment_readable, _time]
+                        self.results.append(_append)  
+                        if self.TERMINAL: print(_append)
+                        if self._outfile is not None: self._outfile.write(str(_append) + "\n")
                     
         return self.results
                 
