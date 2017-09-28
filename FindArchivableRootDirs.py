@@ -25,6 +25,123 @@ import re
 import time
 
 class Find(object):
+    """
+    :NAME:
+        FindArchivableRootDirs.find(parser = {}, *args, **kwargs)
+        
+    :DESCRIPTION:
+        Searches through a directory structure starting at a specified location, 
+        and reports the last MODIFICATION date of files and subdirectories. 
+        
+        The output can be dumped to the terminal, written to file, or both.
+        
+        Output is in the TEXT format (string not a list):
+        ["/full/path/to/dir/or/file", "Age", "Time label", "mtime in epoch"]
+        E.g.
+        ['/Users/mikes/.thumbdata', 2276.97, 'Day(s)', 1309816010.0]
+        
+        Output can be restricted to files (only), directories (only) or both. 
+        NOTE: When directories(only) are output, the age is based on the 
+              YOUNGEST file within the directory NOT the actual directory 
+              creation/mod date!
+              
+        The script can be run at the command line, using switches OR as a class, 
+        passing in variables via the *args/**kwargs parameters. 
+        
+    :USAGE:
+        FindArchivableRootDirs.py --root /Users/user/ \
+                                  --type f \ 
+                                  --out "./out.txt" \
+                                  --older 1y \
+                                  --increment d
+                                  
+        OR
+        
+        obj = Find( root = "/Users/user/",
+                    type = "f",
+                    out = "./out.txt",
+                    older = "1y",
+                    increment = "d",
+                    ) 
+              
+    :ATTRIBUTES:
+        increment(str): The time increment for output. CASE SENSITIVE.
+                   I.e.
+                   Y = Years
+                   M = Months
+                   d = Days
+                   h = Hours
+                   m = Minutes
+                   s = Seconds
+                   H = Human-readable
+                   DEFAULT: Seconds
+
+        screen(bool): Set to "True" to dump output to screen. Otherwise False. 
+                    DEFAULT: True
+        
+        conf(str): (Future) Full path to the config file. 
+                   DEFAULT: "./FindArchivableRootDirs.conf"
+
+        root(str): Starting directory for search. DEFAULT: "."
+        
+        maxdepth(int): Similar to find's maxdepth. How many directories deep to
+                       limit the search. "0" means unlimited (through all 
+                       levels). DEFAULT: 0
+        
+        type(char):  Type of file system objects upon which to report dates. 
+                     I.e.
+                     d=directories (only)
+                     f=files (only)
+                     b=both 
+                     DEFAULT: b
+
+        older(str):  (Older than X) Collect statistics on directories/files that 
+                     are "older than" <int><years/months/days/hours/seconds>.
+                     "0" means just report the age from today.  
+                     DEFAULT: 0
+
+        newer(str):  (Newer than X) Collect statistics on directories/files that 
+                     are "newer than" <int><years/months/days/hours/seconds>.
+                     "0" means just report the age from today.  
+                     DEFAULT: 0
+
+        out(str): Full path to the output file. This file will lget overwwritten
+                  at each run. 
+                  DEFAULT: "./FindArchivableRootDirs.txt"')
+
+        logfile(STR): Output file for logging information (not script output). 
+                      DEFAULT: "system"
+
+        log_level(int): Logging level for logging information (not script 
+                        output). 
+                      DEFAULT: 10 (debug)
+
+        screendump(bool): Should logging output be dumped to the STDOUT.', 
+                          DEFAULT: True
+
+        formatter(str): The formatting string for lgging outpput. (See logging 
+                        module). 
+
+        create_paths(bool): (Logging only). If a logfile does not exist, should
+                            it be created (True/False). 
+                            DEFAULT: True')
+    
+    :METHODS:
+        walkit(): No parameters accepted at the method level.
+                  This runs the actual directory walk and creates the output. 
+                  Global 'self' parameters are used to generate criteria. 
+                  Some attributes can be modified via a normal object set (I.e.
+                  Findobject.maxdepth = 2). 
+        
+                  :returns: A list of lists containing the same data as the text 
+                            output.
+                            
+        main():  Call method 'walkit' verbatim. 
+        
+    :RETURNS: 
+              A list of lists containing the same data as the text output.
+
+    """
     def __init__(self, parser = {}, *args, **kwargs):
         atexit.register(self._cleanup)
         self._set_config(parser, args, kwargs)
@@ -317,7 +434,19 @@ class Find(object):
         del self.NEWER
 
     def walkit(self):
-        """"""
+        """
+        :NAME:
+            walkit(): No parameters accepted at the method level.
+                  This runs the actual directory walk and creates the output. 
+                  Global 'self' parameters are used to generate criteria. 
+                  Some attributes can be modified via a normal object set (I.e.
+                  Findobject.maxdepth = 2). 
+                  
+        :ATTRIBUTES:
+            (See main class "Find")
+            
+        :RETURNS: A list of lists containing the same data as the text output.        
+        """
         self.results = []
         _now = time.time()
         for root, dirs, files in os.walk(self.startdir):
@@ -360,12 +489,29 @@ class Find(object):
                     self.results.append(_append)  
                     if self.TERMINAL: print(_append)
                     if self._outfile is not None: self._outfile.write(str(_append) + "\n")
+                    
+                    return self.results
                 
     def main(self):
-        """"""
+        """
+        :NAME:
+            main()
+                  Calls "walkit()" verbatim.  
+                  No parameters accepted at the method level.
+                  This runs the actual directory walk and creates the output. 
+                  Global 'self' parameters are used to generate criteria. 
+                  Some attributes can be modified via a normal object set (I.e.
+                  Findobject.maxdepth = 2). 
+                  
+        :ATTRIBUTES:
+            (See main class "Find")
+            
+        :RETURNS: A list of lists containing the same data as the text output.        
+        """
         log.debug("Running 'Find' with parameters: {D}".format(D = str(self.__dict__)))
-        self.walkit()
+        _result = self.walkit()
         log.debug("Done.")
+        return _result
         
     
 if __name__ == '__main__':
