@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-from django.forms.renderers import ROOT
 
 __author__      = "Mike Rightmire"
 __copyright__   = "Universitäts Klinikum Heidelberg, Section of Bioinformatics and Systems Cardiology"
@@ -588,7 +587,9 @@ class Find(object):
             print("DIRS:")
             if len(self.directories) > 0:
                 for key,value in self.directories.items():
-                    print(key + ":" + str(value))
+                    # Minus one for directories, to remove empty split at beginning
+                    if ( len(key.split(_delim)) - 1 <= self.maxdepth) or (self.maxdepth == 0):
+                        print(key + ":" + str(value))
             else:
                 print("None")
 
@@ -596,7 +597,10 @@ class Find(object):
             print("FILES:")
             if len(self.files) > 0:
                 for key,value in self.files.items():
-                    print(key + ":" + str(value))
+                    # NO minus one for files, since filename is not
+                    # a 'depth'. Empty first item and filename cancel out
+                    if ( len(key.split(_delim)) <= self.maxdepth) or (self.maxdepth == 0):        
+                        print(key + ":" + str(value))   
             else:
                 print("None")
     
@@ -682,38 +686,36 @@ class Find(object):
             dir_depth = dir_depth.split(checks.directory_deliminator())
             dir_depth = [x for x in dir_depth if len(x) > 1]
             dir_depth = len(dir_depth) + 1 # Start at 1 not 0
-
-            if (dir_depth <= self.maxdepth) or (self.maxdepth == 0):
                 
 #                 _dir_youngest_time = os.stat(root).st_mtime # Reset at each root loop
-                # Need to parse files regardless of "-t", since they determine
-                # the 'youngest' state of the preceding dirs
-                for fn in files:
-                    path = os.path.join(root, fn)
-                    try:
-                        _time = os.stat(path).st_mtime # in epoch
-                    except Exception as e:
-                        message = "Error gathering mtime from path {P}. Skipping. (ERROR: {E})".format(P = path, E = str(e))
-                        # log.error(message)
+            # Need to parse files regardless of "-t", since they determine
+            # the 'youngest' state of the preceding dirs
+            for fn in files:
+                path = os.path.join(root, fn)
+                try:
+                    _time = os.stat(path).st_mtime # in epoch
+                except Exception as e:
+                    message = "Error gathering mtime from path {P}. Skipping. (ERROR: {E})".format(P = path, E = str(e))
+                    # log.error(message)
 #                         self.results.append([message])
 #                         if self.TERMINAL: print(message)
 #                         if self._outfile is not None: self._outfile.write(str([message]) + "\n")
-                        self.files[path] = message
-                        continue
+                    self.files[path] = message
+                    continue
 
-                    self._cascade_dir(root, _time)
-                    
-                    _diff = _now - _time
+                self._cascade_dir(root, _time)
+                
+                _diff = _now - _time
 #                     # Set the directory time to the youngest file in the dir
 #                     if _time > _dir_youngest_time: 
 #                         _dir_youngest_time = _time
-                    # If it matches the input time range                    
-                    if ((_diff >= self.older) or (self.older == 0)) and ((_diff <= self.newer) or (self.newer == 0)):
-                         # If individual file listings was set
-                         if ("f" in self.FILETYPE.lower()) or ("b" in self.FILETYPE.lower()):
-                            _append = [_time, get_time(int(_diff), self.INCREMENTOUT), self.increment_readable]
+                # If it matches the input time range                    
+                if ((_diff >= self.older) or (self.older == 0)) and ((_diff <= self.newer) or (self.newer == 0)):
+                     # If individual file listings was set
+                     if ("f" in self.FILETYPE.lower()) or ("b" in self.FILETYPE.lower()):
+                        _append = [_time, get_time(int(_diff), self.INCREMENTOUT), self.increment_readable]
 #                              self.results.append(_append)
-                            self.files[path] = _append
+                        self.files[path] = _append
 #                              self.files[path] = _time  
 #                              if self.TERMINAL: print(_append)
 #                              if self._outfile is not None: self._outfile.write(str(_append) + "\n")
@@ -721,8 +723,10 @@ class Find(object):
                 
         return self.directories, self.files
                 
-    def write(self, o = None, t = None,  f = "text"):
+    def write(self, o = None, t = None,  f = "text", m = None):
+        """"""
         # Repace global vars with inputs where needed
+        if m is not None: self.maxdepth = int(m)
         _f = str(f).lower()
         # Check for pickling first
         if o is not None:
@@ -760,7 +764,9 @@ class Find(object):
                     self._outfile.write("DIRS:" + "\n")
                     if len(self.directories) > 0:
                         for key,value in self.directories.items():
-                            self._outfile.write(key + ":" + str(value) + "\n")
+                            # Minus one for directories, to remove empty split at beginning
+                            if ( len(key.split(_delim)) - 1 <= self.maxdepth) or (self.maxdepth == 0):
+                                self._outfile.write(key + ":" + str(value) + "\n")
                     else:
                         self._outfile.write("None" + "\n")
         
@@ -768,7 +774,10 @@ class Find(object):
                     self._outfile.write("FILES:" + "\n")
                     if len(self.files) > 0:
                         for key,value in self.files.items():
-                            self._outfile.write(key + ":" + str(value) + "\n")
+                            # NO minus one for files, since filename is not
+                            # a 'depth'. Empty first item and filename cancel out
+                            if ( len(key.split(_delim)) <= self.maxdepth) or (self.maxdepth == 0):
+                                self._outfile.write(key + ":" + str(value) + "\n")
                     else:
                         self._outfile.write("None" + "\n")
                         
