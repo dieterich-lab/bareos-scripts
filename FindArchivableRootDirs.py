@@ -282,9 +282,10 @@ class Find(object):
         # Be sure the formatting comes in consistent
         root = root.strip().rstrip(_delim)
         # If the existing value is older, replace
+        _age = self._now - mtime
         
         try:
-            _append = [mtime, get_time(int(mtime), self.INCREMENTOUT), self.increment_readable]
+            _append = [mtime, get_time(int(_age), self.INCREMENTOUT), self.increment_readable]
             if self.directories[root][0] < mtime:
                  self.directories[root] = _append
 #                 self.directories[root][0] = mtime
@@ -301,7 +302,7 @@ class Find(object):
                 # cascade (previous dir) is smaller(older) than root, replace value
                 if self.directories[cascade][0] < self.directories[root][0]: 
 #                      print(cascade, "is OLDER. Changing:", self.directories[cascade], "to:", self.directories[root])
-                    _append = [self.directories[root][0], get_time(int(self.directories[root][0]), self.INCREMENTOUT), self.increment_readable]
+                    _append = [self.directories[root][0], get_time(int(self._now - self.directories[root][0]), self.INCREMENTOUT), self.increment_readable]
                     self.directories[cascade] = _append 
             # Cascade dir does not yet exist (which will happen if starting from a relative root)
             except KeyError as e:
@@ -318,7 +319,7 @@ class Find(object):
         except Exception as e:
             message += "FAILED ({E})".format(E = str(e))
             # log.error(message)
-        
+    
     def _set_config(self, parser, args, kwargs):
         """"""
         # Set class-wide
@@ -356,7 +357,7 @@ class Find(object):
         self.filetype = kwargs.pop("FILETYPE", "b")
         self.TERMINAL = kwargs.pop("TERMINAL", True)
         self.increment = kwargs.pop("INCREMENTOUT", "s")
-        
+        self._now = time.time()
         # Everything else goes into the conf
         #==== # confighandler Needs to be updated for Python3 ==================
         # for key, value in kwargs.iteritems():
@@ -674,7 +675,6 @@ class Find(object):
         :RETURNS: A list of lists containing the same data as the text output.        
         """
         self.results = []
-        _now = time.time()
         
         for root, dirs, files in os.walk(self.start, topdown=True):
             # The current dir age. 
@@ -705,7 +705,7 @@ class Find(object):
 
                 self._cascade_dir(root, _time)
                 
-                _diff = _now - _time
+                _diff = self._now - _time
 #                     # Set the directory time to the youngest file in the dir
 #                     if _time > _dir_youngest_time: 
 #                         _dir_youngest_time = _time
