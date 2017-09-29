@@ -17,6 +17,7 @@ _delim = checks.directory_deliminator()
 # from common.confighandler  import ConfigHandler # Needs to be updated for Python3
 # from common.loghandler               import log
 from common.convert_timestring_input import convert_timestring_input as get_time 
+from common.convert_timestring_input import age 
 
 import atexit
 import inspect
@@ -282,7 +283,7 @@ class Find(object):
         # Be sure the formatting comes in consistent
         root = root.strip().rstrip(_delim)
         # If the existing value is older, replace
-        _age = self._now - mtime
+        _age = age(mtime)
         
         try:
             _append = [mtime, get_time(int(_age), self.INCREMENTOUT), self.increment_readable]
@@ -302,7 +303,7 @@ class Find(object):
                 # cascade (previous dir) is smaller(older) than root, replace value
                 if self.directories[cascade][0] < self.directories[root][0]: 
 #                      print(cascade, "is OLDER. Changing:", self.directories[cascade], "to:", self.directories[root])
-                    _append = [self.directories[root][0], get_time(int(self._now - self.directories[root][0]), self.INCREMENTOUT), self.increment_readable]
+                    _append = [self.directories[root][0], get_time(int(_age), self.INCREMENTOUT), self.increment_readable]
                     self.directories[cascade] = _append 
             # Cascade dir does not yet exist (which will happen if starting from a relative root)
             except KeyError as e:
@@ -702,7 +703,7 @@ class Find(object):
 #                         if self._outfile is not None: self._outfile.write(str([message]) + "\n")
                     self.files[path] = message
                     continue
-
+                
                 self._cascade_dir(root, _time)
                 
                 _diff = self._now - _time
