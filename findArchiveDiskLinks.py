@@ -18,11 +18,17 @@ checks = Checks()
 _delim = checks.directory_deliminator()
 from common.directory_tools import findLinks
 from common.runsubprocess import RunSubprocess as run
-
+from common.printdots import Printdots
+dots = Printdots()
+from collections import OrderedDict
+from operator import itemgetter   
 from inspect import stack
+
 import atexit
 import ntpath
 import os
+import pickle
+import re
 import time
 
 
@@ -30,8 +36,7 @@ class FindArchiveDiskLinks(object):
     def __init__(self, parser = {}, *args, **kwargs):
         self._set_config(parser, args, kwargs)
         atexit.register(self._cleanup)
-        self.main()
-
+                
     def _arg_parser(self, parser):
         """
         :NAME:
@@ -50,23 +55,25 @@ class FindArchiveDiskLinks(object):
             
         """
         parser.add_argument('--directory', '-d', action="store", dest="START_DIR", type=str, 
-                            default = ".", help='Starting directory for search.')
+                            default = None, help='Starting directory for search.')
         parser.add_argument('--search_dirs', '-D', action="store", dest="SEARCH_DIRS", nargs='*', 
-                            default = ["/beegfs", "/mnt/group_cd"], help='Directories in which to search for missing files. ')
+                            default = None, help='Directories in which to search for missing files. ')
         parser.add_argument('--output', '-o', action="store", dest="OUTPUT", 
-                            default=".", help='Location of the output file. ')
+                            default=None, help='Location and name of the output file. ')
         parser.add_argument('--screendump', '-S', action="store", dest="SCREENDUMP", 
-                            default=True, help='Dump output to screen as well as file. ')
+                            default=None, help='Dump output to screen as well as file. ')
         parser.add_argument('--search', '-s', action="store", dest="SEARCH", 
-                            default=False, help='Search for the missing link. If True, script searches for the missing link. If False, it simply reports it as missing. ')
+                            default=None, help='Search for the missing link. If True, script searches for the missing link. If False, it simply reports it as missing. ')
         parser.add_argument('--search-hard-drive', action="store", dest="SEARCHHDD", 
-                            default=True, help='Search for the missing link. If True, script searches for the missing link. If False, it simply reports it as missing. ')
+                            default=None, help='Search for the missing link. If True, script searches for the missing link. If False, it simply reports it as missing. ')
         parser.add_argument('--only-missing', action="store", dest="ONLYMISSING", 
-                            default=True, help='Display only links with a missing linked file. ')
+                            default=None, help='Display only links with a missing linked file. ')
         parser.add_argument('--include-good', action="store", dest="INCLUDEGOOD", 
-                            default=False, help='Display only links with a missing linked file. ')
+                            default=None, help='Display only links with a missing linked file. ')
         parser.add_argument('--pickle', action="store", dest="PICKLE", 
-                            default=False, help="Python 'Pickle' the search output, instead of text.")
+                            default=None, help="Python 'Pickle' the search output, instead of text.")
+        parser.add_argument('--verbose', "-v", action="store", dest="VERBOSE", 
+                            default=0, help="Lowest verbose level (1)")
         return parser
 
     def _set_config(self, parser, args, kwargs):
@@ -100,12 +107,15 @@ class FindArchiveDiskLinks(object):
         # self.create_paths = kwargs.pop('create_paths', True) # Automatically create missing paths
         #=======================================================================
         # parser stuff
-        self.start_dir      = kwargs.pop("START_DIR", None)
-        self.search_dirs    = kwargs.pop("SEARCH_DIRS", None)
-        self.output         = kwargs.pop("OUTPUT", '.')
-        self.SCREENDUMP     = kwargs.pop("SCREENDUMP", False)
+        # VERBOSE MUST COME FIRST
+        self.verbose      = kwargs.pop("VERBOSE", 0) 
+        self.SCREENDUMP     = kwargs.pop("SCREENDUMP", True)
         if self.SCREENDUMP: self.SCREENDUMP = True # Force to boolean if needed
-        self.dosearch       = kwargs.pop("SEARCH", False)
+        self.STARTTIME = time.time()
+        self.start_dir      = kwargs.pop("START_DIR", ".")
+        self.search_dirs    = kwargs.pop("SEARCH_DIRS", ["/beegfs", "/mnt/group_cd"])
+        self.output         = kwargs.pop("OUTPUT", 'findArchiveDiskLinks-RESULTS-' + self.start_time)
+        self.dosearch       = kwargs.pop("SEARCH", True)
         if self.dosearch: self.dosearch = True 
         self.only_missing   = kwargs.pop("ONLYMISSING", True)
         if self.only_missing: self.only_missing = True 
@@ -115,234 +125,128 @@ class FindArchiveDiskLinks(object):
         if self.PICKLE: self.PICKLE = True  # Actually sets self.only_missing
         self.SEARCHHDD      = kwargs.pop("SEARCHHDD", True) # Actually sets self.only_missing
         if self.SEARCHHDD: self.SEARCHHDD = True  # Actually sets self.only_missing
+ 
         # Script use params
-        self._yes_exists = {}
-        self._no_exists  = {}
-        self.searches    = {}
-        # Load all the direcvtory paths from the archive disk listings
-        self._archive_listings = []
-        try:
-            for file in os.listdir("/beegfs/prj/archive_disks"):
-                _path = "/beegfs/prj/archive_disks/" + file
-                try:
-                    self._dump("Adding " + _path )
-                    with open(_path, "rb") as fh:
-                        for line in fh: 
-                            self._archive_listings.append(line)
-#                     for line in self._archive_listings: print(line) #333
-                except (FileNotFoundError, PermissionError) as e:
-                    err = "Unable to open '{P}'. Skipping. ".format(P = _path)
-                    self._dump(err)
-                    
-        except Exception as e:
-            err = "Path '/beegfs/prj/archive_disks' does not appear to be available. Skipping file listing and continuing.\n(ERR:{E})".format(E = str(e))
-            self._dump(err)
-             
+        # Load all the directory paths from the archive disk listings
+        self.RESULTS = {}
         
-        #=======================================================================
-        # # Everything else goes into the conf
-        # for key, value in kwargs.items():
-        #     self.CONF.set(key, value)
-        #=======================================================================
-        
-        #=== LOGGING DISABLED FOR NOW, DUE TO WEIRD PROBLEMS WITH THE SYSTEM ===
-        # # Log something
-        # log.debug("Running {C}.{M}...".format(C = self.app_name, M = inspect.stack()[0][3]), 
-        #          app_name     = self.app_name,
-        #          logfile      = self.logfile, 
-        #          log_level    = self.log_level, 
-        #          screendump   = self.screendump, 
-        #          create_paths = self.create_paths, 
-        #          )
-        #=======================================================================
-    
-    
-        
-    #===========================================================================
-    # def findLinks(self):
-    #     print("self.start_dir=", self.start_dir) #333
-    #     for name in os.listdir(self.start_dir):
-    #         if name not in (os.curdir, os.pardir):
-    #             full = os.path.join(self.start_dir, name)
-    #             if os.path.islink(full):
-    #                 yield full, os.readlink(full)
-    #===========================================================================
-
     def _cleanup(self):
         exit_msg = "Cleaning up {C}.".format(C = self.__class__.__name__)
-        self._dump(exit_msg)
-        # Dump the searches dete regardless
-        _dir = ntpath.dirname(self.output)
-        if self.PICKLE:
-            _path = _dir + _delim + "findArchiveDiskLinks-searches" + str(time.time()) + ".pickle"
-            msg = ("Dumping searches as pickle...")
+        self.printout(exit_msg)
+        # Pickle 
+        if len(self.RESULTS) > 0 and self.PICKLE == True:
+            _dir = os.getcwd()
+            _path = self.output + ".pickle"
+            msg = ("Dumping searches as pickle to '" + _path + "' ...")
             try:
-                import pickle
                 with open(_path, 'wb') as f:
-                    pickle.dump(self.searches, f)
+                    pickle.dump(self.RESULTS, f)
                     msg += "OK"
             except Exception as e:
                 msg += "FAILED (ERR:{E})".format(E = str(e))
-            self._dump(msg)
-                
-        else:
-            _path = _dir + _delim + "findArchiveDiskLinks-searches" + str(time.time()) + ".text"
-            msg = ("Dumping searches as text...")
-            try:
-                with open(_path, 'w') as f:
-                    for key, value in self.searches.items():
-                        f.write(key)
-                        f.write(value)
-                        msg += "OK"
-            except Exception as e:
-                msg += "FAILED (ERR:{E})".format(E = str(e))
-            self._dump(msg)
-            
-        if self.output:
-            try: self.OUPUT_FH.close()
-            except Exception as e: pass
-        
-        print("Finished.")
-        
-    def _dump(self, *args):
-        _args = ' '.join(args)
-        """"""
-        # Put ny string cleanup here if run into issues
-        if self.SCREENDUMP: print(_args)
-        if self.OUPUT_FH: self.OUPUT_FH.write(_args + "\n")
-            
-    @property
-    def output(self):
-        try:
-            return self.OUTPUT
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-#             log.error() # loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
-            raise ValueError(err)
-        
-    @output.setter
-    def output(self, value):
-        if value is None: self.OUTPUT = None
-        _value = str(value)
-        if _value == ".": _value = os.getcwd() + _delim + "findArchiveDiskLinks" + str(time.time()) + ".out"
-        # Must be full path, so min is /
-        if ( (value is None) or (len(_value) < 1) or (not _value.startswith(_delim)) ): 
-            err = "Attribute '{A}' must be a FULL PATH to a file. (value = '{V}')".format(A = str(stack()[0][3]), V =_value)
-            raise ValueError(err)
-        # Add end slash if not included
-        # Check path
-        try:
-            self.OUPUT_FH = open(_value, "w")
-            self.OUTPUT = _value
-        except Exception as e:
-            err = "{C}.{A}: Unknown error attempting to open file. (File: '{V}', ERR: '{E}')".format(C = self.__class__.__name__, A = str(stack()[0][3]), V =_value, E = str(e))
-            raise IOError(err)
-        
-    @output.deleter
-    def output(self):
-        del self.OUTPUT
+            self.printout(msg)
 
-    @property
-    def start_dir(self):
-        try:
-            return self.START_DIR
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-#             log.error() # loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
-            raise ValueError(err)
-        
-    @start_dir.setter
-    def start_dir(self, value):
-        _value = str(value)
-        if (value is None) or (len(_value) < 1) or (_value == '.'): 
-            _value = os.getcwd() 
-        # Must be full path, so min is /
-        if not _value.startswith(_delim):
-            err = "The 'directory' parameter must be a FULL PATH, or '.' indicating the current directory. (value ='{V}').".format(V = _value)
-            raise ValueError(err)
-        # Add end slash if not included
-        if not _value.endswith(_delim): _value += _delim        
-        # Check path
-        if not os.path.isdir(_value):
-            err = "The value passed in for attribute {A} ({V}) does not appear to be an existing directory.".format(A = str(stack()[0][3]), V = _value)
-#             log.error(err)# loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
-            raise ValueError(err)
-        else:
-            self.START_DIR = _value
-    
-    @start_dir.deleter
-    def start_dir(self):
-        del self.START_DIR
-                
-    @property
-    def search_dirs(self):
-        try:
-            return self.SEARCH_DIRS
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-#             log.error() # loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
-            raise ValueError(err)
-        
-    @search_dirs.setter
-    def search_dirs(self, value):
-        """"""
-        # Must be a list
-        if isinstance(value, str):
-            import ast
-            value = ast.literal_eval(value)
-
-        err = "Attribute '{A}' must be a list, containing directory FULL PATHS as strings. (Value={V})"
-        if not isinstance(value, (list,tuple)) or value is None:
-            raise ValueError(err.format(A = str(stack()[0][3]), V = str(value)))
-        # remove and duplicates
-        value = list(set(value))
-        # Check values
-        for dir in value:
-            if not isinstance(dir, str) or not dir.startswith(_delim): # Must be full path
-                raise ValueError(err.format(A = str(stack()[0][3]), V = str(value)))
-            # Add end slash if needed
-            elif not dir.endswith(_delim):
-                r = value.index(dir) # Get the first instance
-                value[r] = dir + _delim
-        
-        self.SEARCH_DIRS = value
+            # also dump as text
+            _path = self.output + ".text"
+            self.printout("Dumping searches as text to '" + _path + "' ...")
+            self.writeall(outfile = _path)
+            #===================================================================
+            # f = open(_path, 'w')
+            # for key, value in self.RESULTS.items():
+            #     try: link = self.RESULTS[key]["link"]
+            #     except KeyError: link = "!Link_Key_Error!"
+            #     
+            #     try: exists = self.RESULTS[key]["exists"]
+            #     except KeyError: exists = "!Exists_Key_Error!"
+            #     
+            #     try: found = self.RESULTS[key]["found"]
+            #     except KeyError: found = []
+            #     
+            #     msg = self._dump_message(key, link, exists, found, dump_found = True)                
+            #     #===============================================================
+            #     # msg = str(key) + "->"
+            #     # for k in "link", "exists", "found":
+            #     #     try: msg += str(self.RESULTS[key][k])
+            #     #     if not isinstance(self.RESULTS[key][k], (list, tuple)):
+            #     #         try: 
+            #     #             f.write("{k}:{V}\n".format(k = k, V = self.RESULTS[key][k]))
+            #     #         except Exception as e: 
+            #     #             f.write("{k}:{V}\n".format(k = k, V = "UNKNOWN_ERROR", E = str(e)))
+            #     #     else:
+            #     #         f.write("{k}:\n".format(k = k))
+            #     #         for l in self.RESULTS[key][k]:
+            #     #             try: 
+            #     #                 f.write(str(l) + "\n")
+            #     #             except Exception as e: 
+            #     #                 f.write("UNKNOWN ERROR WRITING LIST ITEM ({E})\n".format(E = str(e)))
+            #     #===============================================================
+            #     try: f.write(msg + "\n")
+            #     except Exception as e: 
+            #         f.write("FILE:{K}({E})\n".format(K = "ERROR", E = str(e)))
+            #===================================================================
+                                
+            msg += "DONE."
+            f.close()                
+            self.printout(msg)
                     
-    @search_dirs.deleter
-    def search_dirs(self):
-        del self.SEARCH_DIRS
-                
-    def exists(self, link):
-        """
-        Must return a dict
-        """
-        path = str(link)
-        
-        if not path.startswith(_delim): path = _delim + path
-        # If it exists, gather info
-        result = {"link":path}
-        
-        if os.path.exists(path):
-            result["exists"] = True
-            result["stat"] = os.stat(path)
-        
-            if os.path.isdir(path) :  
-                result["type"] = "dir"
-                _subdirs = next(os.walk(path))[1]
-                _files = next(os.walk(path))[2]
-                result["directories"] = len(_subdirs)
-                result["files"] = len(_files)
-                
-            elif os.path.isfile(path):  
-                result["type"] = "file"
-            
-            else:
-                result["type"] = "unknown"
-                return result
+    def printout(self, *args, **kwargs):
+        """"""
+        if len(args) < 1: return # Nothing passed
+        _verbose = kwargs.pop("VERBOSE", 0)
 
-        else:
-            result["exists"] = False
+        _args = ' '.join(str(s) for s in args)
+        if self.SCREENDUMP and (_verbose <= self.verbose):
+            try: 
+                print(_args)
         
-        return result
+            except UnicodeEncodeError as e:
+                if re.search(".*ascii.*can't\s*encode.*ordinal\s*not\s*in\s*range", _args): 
+                    print(_args.encode('utf8'))
+
+    def _dump_message(self, dir, link, exists, all_found, dump_found = False,  matches = False, num_score = False):
+        _dump_msg = str(dir).strip() 
+        _dump_msg += "->"
+        _dump_msg += str(link).strip()
+        if exists is True: # "True" not just set other than False
+            _dump_msg = "(OK)" + _dump_msg
+        elif "skip" in str(exists).lower() : # "True" not just set other than False
+            _dump_msg = "(SKIPPED)" + _dump_msg
+        else:
+            if len(all_found) < 1:
+                _dump_msg = "(!NOTHING_FOUND!)" + _dump_msg
+            else:
+                _dump_msg = "(" + str(len(all_found)) + ")" + _dump_msg
+                if dump_found is True:
+                    for _found in all_found:
+                        if matches:
+                            p = "\[(-1)(, -1)*(, 0){" + str(matches) + ",}\]"
+                            if re.search(p, str(_found)): 
+                                _dump_msg +="\n" + str(_found)
+                        if num_score:
+                            if self._rank_by_score(_found) >= num_score:                            
+                                _dump_msg +="\n" + str(_found)
+                            
+        return _dump_msg
+    
+    def _rank_by_score(self, scorelist):
+        _path = scorelist[0]
+        _scorelist = scorelist[1]
+        if re.search("/*mnt/group_cd/.*", _path):
+            _scorelist = scorelist[2:]
+        p = "\[(0|-1){1,1}(, -1)*(, 0)*\]"
+        #=======================================================================
+        # if re.search(p, str(_scorelist)):
+        #     print("Setting to 1") 
+        #     _total = len(_scorelist)
+        # else:
+        #     print("Setting to 0") 
+        #     _total = 0
+        #=======================================================================
+        _total = 0
+        for i in range(len(_scorelist) - 1, 0, -1):
+            _value = 1 if _scorelist[i] is 0 else -1
+            _total += ((len(_scorelist) - i) * (_value))
+        return _total
         
     def _score_by_path(self, orig, found):
         """
@@ -384,216 +288,410 @@ class FindArchiveDiskLinks(object):
             except: found_w = ""
             if orig_w == found_w: score_l = [0]  + score_l
             else                : score_l = [-1] + score_l
-        self._dump(str(found) + " : " + str(score_l)) #333
-        autoset = False
-        if sum(score_l) == 0:
-            autoset = True
-            self._dump("Pretending to make the link here...")
-        return {found:[score_l, {"automatically linked": autoset}]}
+        result = [found,score_l]
+        self.printout(result, VERBOSE = 3)
+        return result
 
-    def score_directory_list(self, directories_list, scoring_path):
-        """"""
-        def _parse(directories_list):
-            # scored_found exists only to build a return
-            scored_found = {}
-            for found in directories_list: # MUST BE A LIST
-                _result = self._score_by_path(scoring_path, found)
-                scored_found.update(_result)
-                print("_result=", _result)
-#                 input("Press enter...") #333
-                # Try/except defacto checks for first addition of a list
-                try:
-                    # list item already exists
-                    if self.searches[scoring_path]: self.searches[scoring_path].append(_result)
-                except KeyError as e: self.searches[scoring_path] = [_result]
-                except Exception as e:
-                    err = "score_directory_list._parse: Unknown error attempting to add '[_result]' to self.searches. Skipping. \n(_result={R})".format(R = str(_result))
-                    self._dump(err)
-            
-            return scored_found
-                    
-        if isinstance(directories_list, (list, tuple)):
-            return _parse(directories_list)
-        # Future
-        # elif isinstance(directories_list, str):
-            # pass
-            
-        elif isinstance(directories_list, _io.TextIOWrapper): # File handle
-            _list = []
-            for line in directories_list: _list.append(line)
-            return _parse(_list)
+    @property
+    def outfile(self):
+        try:
+            return self.OUTFILE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.error() # loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
+            raise ValueError(err)
 
+    @outfile.setter
+    def outfile(self, value):
+        _value = str(value)
+        if not _value.startswith(_delim):
+            _value = os.getcwd() + _delim + _value
+        self.OUTFILE = _value
+        self.printout("'{A}' set to '{V}'".format(A = str(stack()[0][3]), V = self.OUTFILE), VERBOSE = 2)
+
+    @outfile.deleter 
+    def outfile(self):
+        del self.OUTFILE
+
+    @property
+    def start_dir(self):
+        try:
+            return self.START_DIR
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.error() # loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
+            raise ValueError(err)
+        
+    @start_dir.setter
+    def start_dir(self, value):
+        _value = str(value)
+        if (value is None) or (len(_value) < 1) or (_value == '.'): 
+            _value = os.getcwd() 
+        # Must be full path, so min is /
+        if not _value.startswith(_delim):
+            err = "The 'directory' parameter must be a FULL PATH, or '.' indicating the current directory. (value ='{V}').".format(V = _value)
+            raise ValueError(err)
+        # Add end slash if not included
+        if not _value.endswith(_delim): _value += _delim        
+        # Check path
+        if not os.path.isdir(_value):
+            err = "The value passed in for attribute {A} ({V}) does not appear to be an existing directory.".format(A = str(stack()[0][3]), V = _value)
+#             log.error(err)# loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
+            raise ValueError(err)
         else:
-            err = "score_directory_list: Unrecognized parameter type for 'directories_list' ({T}). Cannot parse. Skipping. ".format(T = str(type(directories_list)))
-            self._dump(err)
-        
-    def search(self, path):
-        _link_path = str(path)
-#         scored_found = {}
-        all_found    = [] # results of all finds
-        # Search listings first
-#         _link_dir  = ntpath.dirname(_link_path)
-        _link_file = ntpath.basename(_link_path)
-        for _archive_path in self._archive_listings:
-#             print("(SL)", end="") #33333
-#             _archive_dir  = ntpath.dirname(_archive_path)
-            _archive_file = ntpath.basename(_archive_path)
-            _archive_file = ntpath.basename(_archive_path).decode("utf-8")
-            if _archive_file == _link_file:
-#                 print(_archive_file, "v.", _link_file, "=", end="")
-#                 print("!!!!!!!!!!!!!!MATCH!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!") 
-                all_found.append(_archive_path)
-        # If there's a super good match (confirmed) skip searching direcctories
-        # Then search directories
-        if self.SEARCHHDD:
-            for _start_dir in self.search_dirs:
-#                 print("searching: {D} for link: {P}".format(D = _start_dir, P = str(_link_path))) #333
-                # _result will be either 
-                # a list of strings, each str a full path of a found file
-                # Or False
-                _result = self._search_dir(_start_dir, _link_path)
-                if _result is False: continue 
+            self.START_DIR = _value
     
-                for found_path in _result:
-                    # Sometimes extraneous directory delimiters sneak in. Remove
-                    found_path = _delim + _delim.join(i for i in found_path.split(_delim) if len(i) > 0)
-                    all_found.append(found_path)
-    
-        _result = self.score_directory_list(all_found, _link_path)
-            # Use subprocess to do a find for filename in each search dir
-            # Add founds (full path) to all_found
-            # Score the found path against the original path to see if they are similar. 
-            # Add all_found[original path] = {found_path:score}
-            #===================================================================
-            # for found in all_found:
-            #     result = self._score_by_path(_path, found)
-            #     scored_found.update(result)
-            #     print("result=", result)
-            #     input("Press enter...") #333
-            #     # Try/except defacto checks for first addition of a list
-            #     try:
-            #         if self.searches[_path]: # list item already exists
-            #              self.searches[_path].append(result)
-            #     except KeyError as e:
-            #         self.searches[_path] = [result]
-            #===================================================================
-        
-        if _result: return _result
-        else:      return False
-            
-    
-    def _search_listings(self):
-        pass
-            
-    def _search_dir(self, dir, path):
-        """
-        Search the directoris in seach_dirs for the filename. 
-        The try to score it against the original file
-        """
-        print("(SD)", end="") #33333
-        #  path must be a full path, strip to name
-        _search_path = str(dir)
-        _path = str(path)
-        if not _path.startswith(_delim) or not _search_path.startswith(_delim): 
-            err = "{C}.{M}: Either the directory or path are not a FULL PATH.\n(dir:'{D}')\n(path:'{P}'".format(C = self.__class__.__name__, M = stack()[0][3], P = _path, D = _search_path)
-            self._dump(err)
-            return [] 
-        
-#== Include directory names only===============================================
-#         if _path.endswith(_delim):
-#             err = "{C}.{M}: Path '{P}' does not seem to end in a filename.".format(C = self.__class__.__name__, M = stack()[0][3], P = _path)
-# #             raise ValueError(err)
-#             print(err)
-#             return [] 
-#===============================================================================
-        _dir  = ntpath.dirname(_path)
-        _file = ntpath.basename(_path)
-#         scored_found = {}
-        # First, search the text listings of the other archive disks
-        
-        # This searched the physical search dirs
-        command = ["find", _search_path, "-name", _file]
-        find_result = run(command, output = "list")
-        #=======================================================================
-        # result = []
-        # for path in _result:
-        #     # Sometimes extraneous directory delimiters sneak in. Remove
-        #     path = _delim + _delim.join(i for i in path.split(_delim) if len(i) > 0)
-        #     result.append(path)
-        #=======================================================================
-        #=======================================================================
-        # # Add the new results to the all_found
-        # all_found += result 
-        #     # Use subprocess to do a find for filename in each search dir
-        #     # Add founds (full path) to all_found
-        #     # Score the found path against the original path to see if they are similar. 
-        #     # Add all_found[original path] = {found_path:score}
-        # for found in all_found:
-        #     result = self._score_by_path(_path, found)
-        #     scored_found.update(result)
-        #     # Try/except defacto checks for first addition of a list
-        #     try:
-        #         if self.searches[_path]: # list item already exists
-        #              self.searches[_path].append(result)
-        #     except KeyError as e:
-        #         self.searches[_path] = [result]
-        # 
-        #=======================================================================
-        if find_result: return find_result
-        else:           return False
-         
-                    
-    def main(self):
-        """"""
-        # Results is a dict, key = the original link path
-        self.results = {}
-        #=======================================================================
-        # while self.start_dir is None:
-        #     # Assume command line call without parameter
-        #     try:
-        #         self.start_dir = input("Enter the FULL PATH of the directory to search:")
-        #         if self.start_dir is None: raise AttributeError("'None' is not valid. ")
-        #     except (ValueError,AttributeError) as e:
-        #         err = "Invalid input ({E}). \nTry again.".format(E = str(e))
-        #         self._dump(err)
-        #=======================================================================
-            
-        for dir, link in findLinks(self.start_dir, use = "os"):
-            self._dump()
-            self._dump("=================")
-            self._dump("path: {D}\nlinked-to: {L}".format(D = dir, delim = _delim, L = link)) 
-            result = self.exists(link)
-            if result["exists"]:
-                self._yes_exists[dir] = result
-                if not self.only_missing: self._dump("Exists at: '{P}'".format(P = result))
-            else:
-                self._dump ("Linked-to file does not exist.") 
-                self._no_exists[dir] = link
-                if self.dosearch:
-                    print("Searching...".format(SD = self.start_dir, D = dir, delim = _delim, L = link))
-                    if not self.search(link):
-                        self._dump("!Nothing found!")
-                    else:
-                        self._no_exists.pop(dir)
-        
+        self.printout("'{A}' set to '{V}'".format(A = str(stack()[0][3]), V = self.START_DIR), VERBOSE = 2)
 
+    @start_dir.deleter
+    def start_dir(self):
+        del self.START_DIR
+
+    @property
+    def start_time(self):
+        try:
+            return str(self.STARTTIME)
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.error() # loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
+            raise ValueError(err)        
+
+    @start_time.setter 
+    def start_time(self, value):
+        err = "Attribute {A} cannot be manually set. ".format(A = str(stack()[0][3]))
+        raise ValueError(err)    
+         
+    @start_time.deleter 
+    def start_time(self):
+        pass
+                    
+    @property
+    def search_dirs(self):
+        try:
+            return self.SEARCH_DIRS
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.error() # loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
+            raise ValueError(err)
         
-#===============================================================================
-#         for key, value in self.searches.items():
-#             print("======================")
-#             print(key)
-#             for i in value:
-# #                 if "True" in str(i):
-#                 print("...", i)   
-#===============================================================================
-                                
-                #self._no_exists[dir]  = result
-        # Now we have all the links as existing or not. 
-        # Next we need to confirm if the 'existing' links make sense
-#         self.exists_sanity_check() # Will add impossibly 'exists' to the no_exists    
-        # Search for the missing files. 
-#         log.debug("Done.")
+    @search_dirs.setter
+    def search_dirs(self, value):
+        """"""
+        # Must be a list
+        if isinstance(value, str):
+            import ast
+            value = ast.literal_eval(value)
+
+        err = "Attribute '{A}' must be a list, containing directory FULL PATHS as strings. (Value={V})"
+        if not isinstance(value, (list,tuple)) or value is None:
+            raise ValueError(err.format(A = str(stack()[0][3]), V = str(value)))
+        # remove and duplicates
+        value = list(set(value))
+        # Check values
+        for dir in value:
+            if not isinstance(dir, str) or not dir.startswith(_delim): # Must be full path
+                raise ValueError(err.format(A = str(stack()[0][3]), V = str(value)))
+            # Add end slash if needed
+            elif not dir.endswith(_delim):
+                r = value.index(dir) # Get the first instance
+                value[r] = dir + _delim
         
+        self.SEARCH_DIRS = value
+        self.printout("'{A}' set to '{V}'".format(A = str(stack()[0][3]), V = self.SEARCH_DIRS), VERBOSE = 2)
+                     
+    @search_dirs.deleter
+    def search_dirs(self):
+        del self.SEARCH_DIRS
+    
+    @property
+    def verbose(self):
+        try:
+            return self.VERBOSE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            raise ValueError(err)            
+
+    @verbose.setter
+    def verbose(self, value):
+        _value = str(value).lower()
+        try:                _value = int(_value)
+        except ValueError:  _value = _value.count('v')
+        self.VERBOSE = _value
+    
+    @verbose.deleter
+    def verbose(self):
+        del self.VERBOSE
+        
+    def exists(self, path, link):
+        """
+        Must return a dict
+        """
+        _path = str(path).strip()
+        _link = str(link).strip()
+        # path should always be full path
+        if not _path.startswith(_delim): _path = _delim + _path
+        if not _link.startswith(_delim):
+            # It's relative to _path
+            _dir = ntpath.dirname(_path) 
+            _link = _dir + _delim + _link
+        # If it exists, gather info        
+        if os.path.exists(_link):
+            _stats = str(os.stat(_link)) 
+            self.printout("'{L}' exists ({S})".format(L = _link, S = _stats), VERBOSE = 3)
+            return _stats
+        else: 
+            self.printout("'{L}' DOES NOT EXIST", VERBOSE = 3)
+            return False
+                
+    def find(self):
+        """"""
+        # Load up the disk listings from the archive disk text files
+        self.PICKLE = True # Turn on _cleanup pickle
+        self._listings = []
+        if self.dosearch:
+            for file in os.listdir("/beegfs/prj/archive_disks"):
+                _path = "/beegfs/prj/archive_disks/" + file
+                self.printout("Loading listings for:", _path, VERBOSE = 1)
+                try:
+                    with open(_path, "rb") as fh:
+                        for line in fh: 
+                            if isinstance(line, bytes): line = line.decode("utf-8")
+                            line = str(line).strip()
+                            if line.startswith("."): line = line.replace(".", _path + _delim, 1)
+                            # Removes blank directory delimiters
+                            _list = line.split(_delim)
+                            line = _delim + _delim.join(i for i in _list if len(i) > 0) 
+                            self._listings.append(line)
+                except (FileNotFoundError, PermissionError) as e:
+                    err = "Unable to open '{P}'. Skipping. ".format(P = _path)
+                    self.printout(err)
+    
+            # Load listings of the HDD paths        
+            if self.SEARCHHDD:
+                for _dir in self.search_dirs:
+                    self.printout("Loading listings for:", _dir , VERBOSE = 1)
+                    command = ["find", _dir]
+                    find_result = run(command, output = "list")
+                    # The results come in with inconsistent encoding. Clean
+                    for line in find_result: 
+                        if isinstance(line, bytes): line = line.decode("utf-8")
+                        line = str(line).strip()
+                        # Removes blank directory delimiters
+                        _list = line.split(_delim)
+                        line = _delim + _delim.join(i for i in _list if len(i) > 0)
+                        self._listings.append(line)
+        
+        for dir, link in findLinks(self.start_dir, use = "os"):
+            # Dir is the RESULTS key
+            dir = str(dir).strip()
+            self.RESULTS[dir] = {}
+            # Link next
+            link = str(link).strip()
+            self.RESULTS[dir]["link"] = link
+            self.printout("CHECKING: {D}-> {L}".format(D = dir, L = link), VERBOSE = 2) 
+            ### Parse 
+            # Skip common uneeded files
+            # "skips" are regex SEARCHES (not matches)
+            skips = ["__OLD__SOFTWARE__","python\d\.\d", "python-\d\.\d\.\d", "R-\d\.\d\.\d", "s{0,1}ratoolkit\.\d\.\d\.\d\-\d"]
+            for skip in skips:
+                if (re.search(skip, dir)) or (re.search(skip, link)):
+                    self.RESULTS[dir]["exists"] = "Skipped"
+                    self.printout("SKIPPED: Due to '{R}'".format(R = skip), VERBOSE = 3)
+                    continue 
+            # Check if link exists. If so, nect
+            result = self.exists(dir, link)
+            if result is not False: # "True" not just set other than False
+                self.RESULTS[dir]["exists"] = True
+                self.printout("'exists' = '{V}'".format(V = str(self.RESULTS[dir]["exists"])), VERBOSE = 3)
+                self.RESULTS[dir]["stat"]   = result
+                self.printout("'stat' = '{V}'".format(V = str(self.RESULTS[dir]["stat"])), VERBOSE = 3)
+                self.RESULTS[dir]["found"]  = [["exists", []]] # Backward compatibility
+                self.printout("'found' = '{V}'".format(V = str(self.RESULTS[dir]["found"])), VERBOSE = 3)
+
+            else:
+                self.RESULTS[dir]["exists"] = False                
+                if self.dosearch:
+                    all_found = self.search(dir, link)
+                    if len(all_found) < 1:
+                        self.RESULTS[dir]["found"] = [["!NOTHING_FOUND!", []]] # For compatibility
+                        self.printout("'found' = '{V}'".format(V = str(self.RESULTS[dir]["found"])), VERBOSE = 3)
+                    else:
+                        self.RESULTS[dir]["found"] = all_found
+                        self.printout("'found' = '{V}'".format(V = len(str(self.RESULTS[dir]["found"]))), VERBOSE = 3)
+                         
+
+    def printall(self, matches = 2, num_score = False):
+        for key, value in self.RESULTS.items():
+            try: link = self.RESULTS[key]["link"]
+            except KeyError: link = "!Link_Key_Error!"
+            
+            try: exists = self.RESULTS[key]["exists"]
+            except KeyError: exists = "!Exists_Key_Error!"
+            
+            try: found = self.RESULTS[key]["found"]
+            except KeyError: found = []
+            
+            msg = self._dump_message(key, link, exists, found, dump_found = True, matches = matches, num_score = num_score)                
+            try: print(msg)
+            except Exception as e:
+                err = "!ERROR! Could not write line to std out. ({E})".format(E = str(e))
+                print(err)
+        
+    def sort(self, infile = False, outfile = False, by = "score", matches = 2, num_score = False):
+        """
+        Sort the results of a find, from the file output or dict.
+        Returns dicts. Also writes TEXT to an outfile if given. 
+        If infile is False, the internal dict is used...however this only works 
+        if the internal dict is population (I.e. find than run and called before
+        program close...or the pickly object is passed in. 
+        """        
+        def _load_err(k, d, s, e):
+            err = "Something is amiss for {K}:{D} since there should always be a '{S}' key. ({E})".format(K = str(k), D = str(d), S = str(s), E = str(e))
+            print(err)
+            
+        if infile:
+            if isinstance(infile, dict):
+                 self.RESULTS = infile
+
+            elif os.path.isfile(infile):
+                try: FH = open(infile,'rb')
+                except Exception as e:
+                    err = "Unknown error attempting to open '{F}' as a binary file. (ERR: {E})".format(F = str(infile), E = str(e))
+                    raise ValueError(err)
+                
+                try: self.RESULTS = pickle.load(FH)
+                except Exception as e:
+                    err = "Unknown error attempting to un-pickle file '{F}'. Is it a pickle file? (ERR: {E})".format(F = str(infile), E = str(e))
+                    raise ValueError(err)
+
+                # Reset outfile to match the input file                
+                _matches = re.search("(.*)(\.pickle.*|\.text.*|\.pkl.*|\.txt.*)*", str(infile), re.IGNORECASE)
+                if _matches is not None:
+                    self.outfile = _matches.groups()[0]
+                else:
+                    err = "Failure regex matching '{I}'".format(I = str(infile))
+                    raise RuntimeError(err)
+                                    
+        else: # infile false
+            if self.RESULTS == {}:
+                err = "Unable to grab RESULTS dictionary from self or parameter 'infile'. Please re-run the sort method after running find(), or passing in a valid dictionary or the file path for a valid dictionary pickle. "
+                raise RuntimeError(err)
+            # Otherwise, self.RESULTS should already be populated.
+        
+        try: matches = int(matches)
+        except:
+            err = "Parameter 'matches' must be an integer. (value = {V})".format(V = str(matches))
+            raise ValueError(err)
+
+        if outfile is True: 
+            outfile = ''.join([self.output, ".", str(i), "-sorted.text"])
+        elif checks.isPathFormat(outfile):
+            outfile = outfile
+        else:
+            outfile = False
+            
+            #===================================================================
+            # try: OUTFH = open(outfile, "w")
+            # except Exception as e:
+            #     err = "UNknown error attempting to open outfile '{O}'".format(O = str(outfile))
+            #     raise IOError(err)                
+            #===================================================================
+
+        # MAIN ==============================
+        for key, data in self.RESULTS.items():
+           # --------------------------- 
+            try: _path = key.strip()
+            except (KeyError) as e:
+                _load_err(key, data, "(Original_File) Key", e)
+                continue
+           # ---------------------------             
+            try: _linked_to_path = self.RESULTS[key]["link"].strip()
+            except (KeyError) as e:
+                _load_err(key, data, "link", e)
+                continue
+           # --------------------------- 
+            try: 
+                _exists = self.RESULTS[key]["exists"]
+            except (KeyError) as e:
+                _load_err(key, data, "exists", e)
+                continue
+           # --------------------------- 
+            try: 
+                _found = self.RESULTS[key]["found"]
+            except (KeyError) as e:
+                _load_err(key, data, "found", e)
+                continue
+            #################################################################
+            # Fix inconsistency with how "found" was tracked. Can be removed
+            if _found == [] or ("NOTHING_FOUND" in _found):
+                if _exists == True:
+                    self.RESULTS[key]["found"] = _found = [["exists", []]] # For compatibility
+                else:
+                    self.RESULTS[key]["found"] = _found = [["!NOTHING_FOUND!", []]] # For compatibility                    
+                continue
+            #################################################################
+            if ("NOTHING_FOUND" in _found) or ("exists" in _found):
+                continue
+            _found_sorted = sorted(_found, key=self._rank_by_score, reverse = True)
+            # Replace original list with sorted list for ater pickle
+            self.RESULTS[key]["found"] = _found_sorted 
+            if outfile:         self.writeall(outfile = outfile, matches = matches, num_score = num_score)
+            if self.SCREENDUMP: self.printall(matches = matches, num_score = num_score)
+
+    def search(self, orig_file_path, link_path, both = True):
+        """"""
+        def _search(path):
+            _dir  = ntpath.dirname(path)
+            _file = ntpath.basename(path)
+            _num = re.search("(archive_disk_)(\d)(_contents)", orig_file_path)
+            try:
+                _num = _num.groups()[1]
+                int(_num)
+            except ValueError as e:
+                err = "search: regex for original file's archive disk number ended up invalid (number:{N}). Halting. !Please check!".format(F = str(_num))
+            for _listing_path in self._listings:
+                # Dont search the content listings for the same disk were investigating
+                if re.search("archive_disk_{N}_contents".format(N = str(_num)), _listing_path): 
+                    continue
+                
+                _listing_dir  = ntpath.dirname(_listing_path)
+                _listing_file = ntpath.basename(_listing_path)
+                if _listing_path.endswith(_file):
+                    _append = self._score_by_path(link_path, _listing_path)
+                    print("Appending:", _append)
+                    all_found.append(_append)
+            
+        _link_path = str(link_path).strip()
+        all_found    = [] # results of all finds
+        self.printout("SEARCHING FOR LINK:", link_path, VERBOSE = 2)
+        _search(link_path)
+        self.printout("SEARCHING FOR ORIGINAL:", orig_file_path, VERBOSE = 2)
+        _search(orig_file_path)
+        
+        return all_found
+    
+    def writeall(self, outfile, matches = 2, num_score = False):
+        try: FHOUT = open(outfile, "w")
+        except Exception as e:
+            err = "Unable to open file '{F}'. (!ERROR!: {E})".format(F = str(outfile), E = str(e))
+            raise IOError(err)
+        
+        for key, value in self.RESULTS.items():
+            try: link = self.RESULTS[key]["link"]
+            except KeyError: link = "!'link'_Key_Error!"
+            
+            try: exists = self.RESULTS[key]["exists"]
+            except KeyError: exists = "!'exists'_Key_Error!"
+            
+            try: found = self.RESULTS[key]["found"]
+            except KeyError: found = ["!'found'_Key_Error!"]
+            
+            msg = self._dump_message(key, link, exists, found, dump_found = True, matches = matches, num_score = num_score)                
+            try: FHOUT.write(msg + "\n")
+            except Exception as e:
+                err = "!ERROR! Could not write line to {F} out. ({E})".format(F = str(FHOUT), E = str(e))
+                print(err)
+                
     
 if __name__ == '__main__':
     parser = ArgumentParser()
