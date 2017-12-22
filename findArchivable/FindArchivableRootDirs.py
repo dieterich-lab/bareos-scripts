@@ -25,6 +25,8 @@ import ntpath
 import os
 import re
 import time
+_now=time.time()
+
 
 class Find(object):
     """
@@ -39,7 +41,7 @@ class Find(object):
         
         Reports are stored within the class object as two dictionaries: 
             self.dictionaries
-            self.file
+            self.files
             
             in the format:
             {"file/dir_path_string":[<mtime>, <age>, '<age_delimiter>']}
@@ -51,7 +53,7 @@ class Find(object):
             /Users/mikes:[1506674640.0, 418520.73, 'Hour(s)']
         
         Output to file is (currently) restricted to capturing the text format
-        of pickling the output dictionary objects self.directories and 
+        or pickling the output dictionary objects self.directories and 
         self.files. 
         
         Placeholders are set for output to CSV, XLS, XLSX, etc...but
@@ -200,6 +202,7 @@ class Find(object):
     def __init__(self, parser = {}, *args, **kwargs):
         atexit.register(self._cleanup)
         self._set_config(parser, args, kwargs)
+        self.main()
                 
     def _arg_parser(self, parser):
         """
@@ -311,6 +314,20 @@ class Find(object):
 
     def _cleanup(self):
         message = "Calling cleanup..."
+        _dir = os.getcwd()
+        ###################
+        # self.files
+        _path = self.outfile + ".pickle"
+        msg = ("Dumping searches as pickle to '" + _path + "' ...")
+        try:
+            with open(_path, 'wb') as f:
+                pickle.dump([self.directories, self.files], f)
+            msg += "OK"
+        except Exception as e:
+            msg += "FAILED (ERR:{E})".format(E = str(e))
+
+        # also dump as text
+        _path = self.outfile + ".text"
         try: 
             # All cleanup here ##################################
             if self.outfile is not None: self._outfile.close()
@@ -322,7 +339,7 @@ class Find(object):
             # log.error(message)
     
     def _set_config(self, parser, args, kwargs):
-        """"""
+        """"""        
         # Set class-wide
         self.app_name = self.__class__.__name__
 #         self.CONF   = ConfigHandler() # Needs to be updated for Python3
@@ -353,7 +370,7 @@ class Find(object):
         self.start = kwargs.pop("STARTDIR", ".") 
         self.older = kwargs.pop("OLDER", 0)
         self.newer = kwargs.pop("NEWER", 0)
-        self.outfile = kwargs.pop("OUTFILE", None)
+        self.outfile = kwargs.pop("OUTFILE", "FindArchivableRootDirs." + str(_now) + ".out")
         self.maxdepth = kwargs.pop("MAXDEPTH", 0)
         self.filetype = kwargs.pop("FILETYPE", "b")
         self.TERMINAL = kwargs.pop("TERMINAL", True)
@@ -503,10 +520,12 @@ class Find(object):
         
     @outfile.setter
     def outfile(self, value):
-        if "none" in str(value).lower():
-            self.OUTFILE = None
-            self._outfile = None
-            return 
+        #=======================================================================
+        # if "none" in str(value).lower():
+        #     self.OUTFILE = None
+        #     self._outfile = None
+        #     return 
+        #=======================================================================
 
         if value.startswith('.'):
             _current = os.getcwd()
@@ -675,9 +694,15 @@ class Find(object):
             
         :RETURNS: A list of lists containing the same data as the text output.        
         """
+        print("IN walkit)")
+
         self.results = []
+        print("Starting in: ", self.start)
         
+        count=0
         for root, dirs, files in os.walk(self.start, topdown=True):
+            count += 1
+            if count % 1000 == 0: print("-" + str(count), end="")
             # The current dir age. 
             # Check depth RELATIVE TO root
             # Just set its time for now. The file search with cascade it if needed.
@@ -804,6 +829,7 @@ class Find(object):
         :RETURNS: A list of lists containing the same data as the text output.        
         """
         # log.debug("Running 'Find' with parameters: {D}".format(D = str(self.__dict__)))
+        print("IN main)")
         _result = self.walkit()
         if self.TERMINAL: self.dump()
         if self.outfile: self.write()
@@ -814,4 +840,3 @@ class Find(object):
 if __name__ == '__main__':
     parser = ArgumentParser()
     object = Find(parser)
-    object.main()
