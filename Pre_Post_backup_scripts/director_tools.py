@@ -20,6 +20,9 @@ checks = Checks()
 _delim = checks.directory_deliminator()
 from common.loghandler import log
 from inspect import stack
+from pathlib import Path
+from shutil import copyfile
+import tempfile
 
 import abc
 import grp
@@ -87,11 +90,11 @@ FileSet {{
 #)
 
 job_template = """
-Job {
+Job {{
   Name = "{NAME}"
   FileSet = "{FILESET}"
   JobDefs = "{JOBDEF}"
-}
+}}
 """
 # .format(
 #     NAME = "NAME", 
@@ -100,66 +103,34 @@ Job {
 # )
 ### Factories ###############################################################
 
+def _name_from_path(dir):
+    # "/the/full/path" to "Autogen-the_full_path"     
+    return ''.join(["Autogen-", str(dir).replace(_delim, "_").strip("_")])
+
+    
 class gen_bareos(metaclass=abc.ABCMeta):
     def __init__(self, parser = {}, *args, **kwargs):
-        self.parser = parser
-        self.args   = args
-        self.kwargs = kwargs 
-        self._set_config(parser, args, kwargs) # NEVER REMOVE
-
-    def _arg_parser(self, parser):
-        """
-        :NAME:
-        _arg_parser
-        
-        :DESCRIPTION:
-        Put all the argparse set up lines here, for example...
-            parser.add_argument('--switch', '-s', 
-                                action ="store", 
-                                dest   ="variable_name", type=str, default = '.', 
-                                help   ='Starting directory for search.'
-                                )
-        
-        :RETURNS:
-            Returns the parser object for later use by argparse
-            
-        """
-        ### ALWAYS SET DEFAULTS IN @property ##################################
-        parser.add_argument('--directory', action="store", dest="DIRECTORY", type=str, default = False, 
-                            help='The directory upon which action is based. (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir')
-        parser.add_argument('--jobdefs', action='store_true', dest="JOBDEFS", #type=bool, default = False, 
-                            help='Create/Delete jobdefs for directory in director. ')
-        parser.add_argument('--generate', action='store_true', dest="GENERATE", #type=bool, default = False, 
-                            help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
-        parser.add_argument('--remove', action='store_true', dest="REMOVE", #type=bool, default = False, 
-                            help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
-        parser.add_argument('--logfile', '-L', action="store", dest="LOGFILE", type=str, 
-                            help='Logfile file name or full path.\nDEFAULT: ./classname.log')
-        parser.add_argument('--log-level', '-l', action="store", dest="LOGLEVEL", type=str, 
-                            help='Logging level.\nDEFAULT: 10.')
-        parser.add_argument('--screendump', '-S', action="store", dest="SCREENDUMP", type=str,  
-                            help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
-        parser.add_argument('--create-paths', '-C', action="store", dest="CREATEPATHS", type=str, 
-                            help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
-        parser.add_argument('--test', '-t', action="store", dest="TEST", type=str, 
-                            help='"test" mode only. Do not perform any real actions (I.e. file writes). \nDEFAULT: False')
-        parser.add_argument('--dir-uid', action="store", dest="DIRUID", type=str, 
-                            help='The user ID or username of for the bareos install. \nDEFAULT: bareos')
-        parser.add_argument('--dir-gid', action="store", dest="DIRGID", type=str, 
-                            help='The group ID or groupname of for the bareos install. \nDEFAULT: bareos')
-
-        return parser
-    
-    def _set_config(self, parser, args, kwargs):
-        """"""
-        # Set class-wide
         self.app_name = self.__class__.__name__
 #         self.CONF   = ConfigHandler()# ConfigHandler disabled until py3 update
-        self.ARGS   = args
-        self.KWARGS = kwargs        
         # Convert parsed args to dict and add to kwargs
         if isinstance(parser, ArgumentParser):
-            parser = self._arg_parser(parser)
+#             parser = self._arg_parser(parser)
+            ### ALWAYS SET DEFAULTS IN @property ##################################
+            parser.add_argument('--directory', action="store", dest="DIRECTORY", type=str, default = None, help='The directory upon which action is based. (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir')
+            parser.add_argument('--director-path', action="store", dest="DIRECTORPATH", type=str, default = None, help='The directory upon which action is based. (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir')
+            parser.add_argument('--full', action='store_true', dest="FULL", help='Run a Full backup  ')
+            parser.add_argument('--generate', action='store_true', dest="GENERATE", help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
+            parser.add_argument('--remove', action='store_true', dest="REMOVE", help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
+            parser.add_argument('--logfile', '-L', action="store", dest="LOGFILE", type=str, default = None, help='Logfile file name or full path.\nDEFAULT: ./classname.log')
+            parser.add_argument('--log-level', '-l', action="store", dest="LOGLEVEL", type=str, default = None, help='Logging level.\nDEFAULT: 10.')
+            parser.add_argument('--screendump', '-S', action="store", dest="SCREENDUMP", type=str, default = None, help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
+            parser.add_argument('--create-paths', '-C', action="store", dest="CREATEPATHS", type=str, default = None, help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
+            parser.add_argument('--test', action='store_true', dest="TEST", help='"test" mode only. Do not perform any real actions (I.e. file writes). \nDEFAULT: False')
+            parser.add_argument('--dir-uid', action="store", dest="DIRUID", type=str, default = None, help='The user ID or username of for the bareos install. \nDEFAULT: bareos')
+            parser.add_argument('--dir-gid', action="store", dest="DIRGID", type=str,  default = None, help='The group ID or groupname of for the bareos install. \nDEFAULT: bareos')
+            parser.add_argument('--include-symlinks', action='store_true', dest="SYMLINKS", help='Backup the actual data from symlinks. This is the equiv of putting a "." at the end of the fileset path. I.e. "/root/dir/."')
+            ###################################################################
+            
             parser_kwargs = parser.parse_args()
             kwargs.update(vars(parser_kwargs))
 
@@ -170,15 +141,19 @@ class gen_bareos(metaclass=abc.ABCMeta):
             err = "{C}.{M}: Parameter 'parser' ({P}) must be either an Argparse parser object or a dictionary. ".format(C = self.app_name, M = inspect.stack()[0][3], P = str(parser))
             raise ValueError(err)
         
-        # #=== loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
+        # Set classwide
+        self.parser = parser
+        self.args   = args
+        self.kwargs = kwargs 
+
         # # Here we parse out any args and kwargs that are not needed within the self or self.CONF objects
         # # if "flag" in args: self.flag = something
         ### ALWAYS SET DEFAULTS IN @property #################################
         # # Logging
-        self.logfile        = kwargs.pop("LOGFILE",     None)
-        self.log_level      = kwargs.pop("LOGLEVEL",    None)
-        self.screendump     = kwargs.pop("SCREENDUMP",  None)
-        self.create_paths   = kwargs.pop("CREATEPATHS", None)
+        self.logfile        = kwargs.get("LOGFILE",     None)
+        self.log_level      = kwargs.get("LOGLEVEL",    None)
+        self.screendump     = kwargs.get("SCREENDUMP",  None)
+        self.create_paths   = kwargs.get("CREATEPATHS", None)
         #=== loghandler bugfix in Jessie access to self.socket.send(msg)
         # Only use actual filesystem file for log for now
         # Log something
@@ -189,13 +164,117 @@ class gen_bareos(metaclass=abc.ABCMeta):
                  screendump   = self.screendump, 
                  create_paths = self.create_paths, 
                  )
-        # Start params here
-        self.directory      = kwargs.pop("DIRECTORY",   None)
-        self.generate       = kwargs.pop("GENERATE",    None)
-        self.remove         = kwargs.pop("REMOVE",      None)
-        self.diruid         = kwargs.pop("DIRUID",      "bareos")
-        self.dirgid         = kwargs.pop("DIRGID",      "bareos")
-        self.test           = True if kwargs.pop("TEST", False) else False 
+        #ONLY the params local to this class. Subcleasses do their own
+        self.directory      = kwargs.get("DIRECTORY",   None)
+        self.director_path  = kwargs.get("DIRECTORPATH",None)
+        self.generate       = kwargs.get("GENERATE",    None)
+        self.remove         = kwargs.get("REMOVE",      None)
+        self.diruid         = kwargs.get("DIRUID",      None)
+        self.dirgid         = kwargs.get("DIRGID",      None)
+        self.symlinks       = kwargs.get("SYMLINKS",    None)
+        self.test           = True if kwargs.get("TEST", False) else False
+        
+#         self._set_config(parser, args, kwargs) # NEVER REMOVE
+
+#===============================================================================
+#     def _arg_parser(self, parser):
+#         """
+#         :NAME:
+#         _arg_parser
+#         
+#         :DESCRIPTION:
+#         Put all the argparse set up lines here, for example...
+#             parser.add_argument('--switch', '-s', 
+#                                 action ="store", 
+#                                 dest   ="variable_name", type=str, default = '.', 
+#                                 help   ='Starting directory for search.'
+#                                 )
+#         
+#         :RETURNS:
+#             Returns the parser object for later use by argparse
+#             
+#         """
+#         ### ALWAYS SET DEFAULTS IN @property ##################################
+#         parser.add_argument('--directory', action="store", dest="DIRECTORY", type=str, default = False, 
+#                             help='The directory upon which action is based. (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir')
+# 
+#         
+#         
+#         
+#         parser.add_argument('--full', action='store_true', dest="FULL", #type=bool, default = False, 
+#                             help='Run a Full backup  ')
+#         parser.add_argument('--filesets', action='store_true', dest="FILESETS", #type=bool, default = False, 
+#                             help='Create/Delete jobdefs for directory in director. ')
+#         parser.add_argument('--generate', action='store_true', dest="GENERATE", #type=bool, default = False, 
+#                             help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
+#         parser.add_argument('--remove', action='store_true', dest="REMOVE", #type=bool, default = False, 
+#                             help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
+#         parser.add_argument('--logfile', '-L', action="store", dest="LOGFILE", type=str, 
+#                             help='Logfile file name or full path.\nDEFAULT: ./classname.log')
+#         parser.add_argument('--log-level', '-l', action="store", dest="LOGLEVEL", type=str, 
+#                             help='Logging level.\nDEFAULT: 10.')
+#         parser.add_argument('--screendump', '-S', action="store", dest="SCREENDUMP", type=str,  
+#                             help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
+#         parser.add_argument('--create-paths', '-C', action="store", dest="CREATEPATHS", type=str, 
+#                             help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
+#         parser.add_argument('--test', action='store_true', dest="TEST", 
+#                             help='"test" mode only. Do not perform any real actions (I.e. file writes). \nDEFAULT: False')
+#         parser.add_argument('--dir-uid', action="store", dest="DIRUID", type=str, 
+#                             help='The user ID or username of for the bareos install. \nDEFAULT: bareos')
+#         parser.add_argument('--dir-gid', action="store", dest="DIRGID", type=str, 
+#                             help='The group ID or groupname of for the bareos install. \nDEFAULT: bareos')
+# 
+#         return parser
+#     
+# #===============================================================================
+# #     def _set_config(self, parser, args, kwargs):
+# #         """"""
+# #         # Set class-wide
+# #         self.app_name = self.__class__.__name__
+# # #         self.CONF   = ConfigHandler()# ConfigHandler disabled until py3 update
+# #         self.args   = args
+# #         self.kwargs = kwargs        
+# #         # Convert parsed args to dict and add to kwargs
+# #         if isinstance(parser, ArgumentParser):
+# #             parser = self._arg_parser(parser)
+# #             parser_kwargs = parser.parse_args()
+# #             kwargs.update(vars(parser_kwargs))
+# # 
+# #         elif isinstance(parser, dict):
+# #             kwargs.update(parser)
+# #             
+# #         else:
+# #             err = "{C}.{M}: Parameter 'parser' ({P}) must be either an Argparse parser object or a dictionary. ".format(C = self.app_name, M = inspect.stack()[0][3], P = str(parser))
+# #             raise ValueError(err)
+# #         
+# #         # #=== loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
+# #         # # Here we parse out any args and kwargs that are not needed within the self or self.CONF objects
+# #         # # if "flag" in args: self.flag = something
+# #         ### ALWAYS SET DEFAULTS IN @property #################################
+# #         # # Logging
+# #         self.logfile        = kwargs.get("LOGFILE",     None)
+# #         self.log_level      = kwargs.get("LOGLEVEL",    None)
+# #         self.screendump     = kwargs.get("SCREENDUMP",  None)
+# #         self.create_paths   = kwargs.get("CREATEPATHS", None)
+# #         #=== loghandler bugfix in Jessie access to self.socket.send(msg)
+# #         # Only use actual filesystem file for log for now
+# #         # Log something
+# #         log.debug("Starting  {C}...".format(C = self.app_name), 
+# #                  app_name     = self.app_name,
+# #                  logfile      = self.logfile, 
+# #                  log_level    = self.log_level, 
+# #                  screendump   = self.screendump, 
+# #                  create_paths = self.create_paths, 
+# #                  )
+# #         # Start params here
+# #         self.directory      = kwargs.get("DIRECTORY",   None)
+# #         self.generate       = kwargs.get("GENERATE",    None)
+# #         self.remove         = kwargs.get("REMOVE",      None)
+# #         self.diruid         = kwargs.get("DIRUID",      "bareos")
+# #         self.dirgid         = kwargs.get("DIRGID",      "bareos")
+# #         self.test           = True if kwargs.get("TEST", False) else False
+# #===============================================================================
+#===============================================================================
 
     @property
     def directory(self):
@@ -224,7 +303,32 @@ class gen_bareos(metaclass=abc.ABCMeta):
     @directory.deleter
     def directory(self):
         del self.DIRECTORY
-
+    
+    @property
+    def director_path(self):
+        try: return self.DIRECTORPATH
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+         
+    @director_path.setter
+    def director_path(self, value):
+        if value is None: value = "/etc/bareos/bareos-dir.d" 
+        _value = str(value)
+        _value = _value if _value.endswith(_delim) else _value + _delim
+        # Do checks and such here
+        if (not os.path.isdir(_value)):
+            err = "Attribute '{A}. '{V}' does not appear to exist or is not readable.".format(A = str(stack()[0][3]), V = _value)
+            log.error(err)
+            raise ValueError(err)
+        else:
+            self.DIRECTORPATH = _value
+ 
+    @director_path.deleter
+    def director_path(self):
+        del self.DIRECTORPATH
+    
     @property
     def logfile(self):
         try: return self.LOGFILE
@@ -326,7 +430,7 @@ class gen_bareos(metaclass=abc.ABCMeta):
         if value is None: 
             value = "bareos"
             err = "Attribute {A} cannot be set to 'None'. Using default value of '{V}'".format(A = str(stack()[0][3]), V = value)
-            log.error(err)
+            log.warning(err)
         # Do checks and such here
         try:  self.DIRUID = int(value)
         except ValueError as e:
@@ -352,7 +456,7 @@ class gen_bareos(metaclass=abc.ABCMeta):
         if value is None: 
             value = "bareos"
             err = "Attribute {A} cannot be set to 'None'. Using default value of '{V}'".format(A = str(stack()[0][3]), V = value)
-            log.error(err)
+            log.warning(err)
         # Do checks and such here
         try:  self.DIRGID = int(value)
         except ValueError as e:
@@ -365,117 +469,517 @@ class gen_bareos(metaclass=abc.ABCMeta):
     def dirgid(self):
         del self.DIRGID
 
-
-class gen_jobdefs(gen_bareos):
-    """
-    DO NOT call directly. Call via DirectorTools
-    """
-    def __init__(self, dir_list, *args, **kwargs):
-#                 director_path = "/etc/bareos/bareos-dir.d/",
-#                 diruid = 112, # Default for bareos on phobos
-#                 dirgid = 119, # Default for bareos on phobos 
-#                 CLIENT = "phobos-fd",
-#                 TYPE    = "Backup",
-#                 LEVEL   = "Full", 
-#                 POOL    = "Full",
-#                 STORAGE = "Tape",
-#                 MESSAGES = "Standard",
-#                 PRIORITY = 10,
-#                 BOOTSTRAP = "/var/lib/bareos/%c.bsr",
-#                 FULLBACKUPPOOL  = "Full",
-#                 DIFFBACKUPPOOL  = "Differential" ,
-#                 INCBACKUPPOOL   = "Incremental", 
-#                 test = False
-#                 ):
-        self.dir_list       = dir_list
-        self.director_path  = kwargs.pop("director_path", "/etc/bareos/bareos-dir.d/")
-        self.diruid         = kwargs.pop("diruid", 112)
-        self.dirgid         = kwargs.pop("dirgid", 119)
-
-        self.TYPE           = kwargs.pop("TYPE",    "Backup")
-        self.LEVEL          = kwargs.pop("LEVEL",   "Full")
-        self.POOL           = kwargs.pop("POOL",    "Full")
-        self.CLIENT         = kwargs.pop("CLIENT",  "phobos-fd")
-        self.SCHEDULE       = kwargs.pop("SCHEDULE", None)
-        self.STORAGE        = kwargs.pop("STORAGE", "Tape")
-        self.MESSAGES       = kwargs.pop("MESSAGES","Standard")
-        self.PRIORITY       = kwargs.pop("PRIORITY", 10)
-        self.BOOTSTRAP      = kwargs.pop("BOOTSTRAP","/var/lib/bareos/%c.bsr") 
-        self.FULLBACKUPPOOL = kwargs.pop("FULLBACKUPPOOL", "Full")
-        self.DIFFBACKUPPOOL = kwargs.pop("DIFFBACKUPPOOL", "Differential")
-        self.INCBACKUPPOOL  = kwargs.pop("INCBACKUPPOOL" , "Incremental")         
-        self.test           = True if kwargs.pop("test", False) else False 
+    @property
+    def symlinks(self):
+        try: return self.SYMLINKS
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
         
-        log.debug("Calling: gen_jobdefs with '{D}'".format(D = self.dir_list))
-#         super().__init__(parser, args, kwargs)
-        self.main()
-    
-    def main(self):
+    @symlinks.setter
+    def symlinks(self, value):
+        if value is None: value = ""
+        if value        : self.SYMLINKS = "." # Adds a dot
+        else            : self.SYMLINKS = "" # Adds nothing
+
+    @symlinks.deleter
+    def symlinks(self):
+        del self.SYMLINKS
+
+    def controlled_delete(self, p):
+        _p = str(p)
+        msg = "DELETING FILE: '{P}'".format(P = _p)
+        log.warning(msg)
+
+        filename = ntpath.basename(_p)
+        lastdir  = ntpath.dirname(_p)
+        lastdir  = lastdir.split(_delim)
+        lastdir  = lastdir[len(lastdir)-1]
+        print("lastdir=", lastdir)         
+        tmpdir   = os.path.join(tempfile.gettempdir(), "bareos_director_deletes", lastdir)
+
+        if not os.path.isdir(tmpdir):
+            try: os.makedirs(tmpdir)
+            except Exception as e:
+                err = "Unable to create 'deletion' directory '{D}'. Aborting delete. Please remove files manually. (ERR: {E}".format(D = tmpdir, E = str(e))
+                log.error(err)
+                raise RuntimeError(err)
+
+        dst = os.path.join(tmpdir, filename)
+            
+#         print("Copy from '{P}' to '{D}'".format(P = _p, D = dst) )
+        copyfile(p, dst)        
+        p.unlink()
+
+    def gen_jobdefs(self):
+        """
+        DO NOT call directly. Call via DirectorTools
+        """
+        # only grab one level deep
+        for dir in self.dir_list:
+            if dir.startswith('.'): 
+                log.warning("Skipping hidden file/directory: '{D}'".format(D = dir))
+                continue
+            dir     = dir if dir.endswith(_delim) else dir + _delim
+            _name   = _name_from_path(dir)
+            _filename = ''.join([self.director_path, "jobdefs", _delim, _name, ".conf"])
+            
+            _template = jobdef_template.format(
+                        NAME  = _name,
+                        TYPE  = self.backup_type,
+                        LEVEL = self.level,
+                        POOL  = self.pool,
+                        CLIENT = self.client, 
+                        FILESET = _name, # Uses the fileset name, not the actual dir
+                        SCHEDULE = self.schedule,
+                        STORAGE = self.storage,
+                        MESSAGES = self.messages, 
+                        PRIORITY = self.priority,
+                        BOOTSTRAP = self.bootstrap, 
+                        FULLBACKUPPOOL = self.fullbackuppool,
+                        DIFFBACKUPPOOL = self.diffbackuppool, 
+                        INCBACKUPPOOL  = self.incbackuppool         
+                        )
+            
+            msg = "Creating: '{F}'".format(F = _filename)
+            if self.test:  msg += " (TEST ONLY)"
+            log.debug(msg)
+            if self.test: 
+                print(_template)
+            else:
+                with open(_filename, "w") as FH: 
+                    FH.write(_template)
+                os.chmod(_filename, 0o755)
+                os.chown(_filename, self.diruid, self.dirgid)
+
+    def rem_jobdefs(self):
+        # For now simple and dirty
+        _path = ''.join([self.director_path, "jobdefs", _delim])
+        for p in Path(_path).glob("Autogen-*.conf"):
+            self.controlled_delete(p)
+
+    def gen_filesets(self):
+        """
+        DO NOT call directly. Call via DirectorTools
+        """
         # only grab one level deep
         for dir in self.dir_list:
             if dir.startswith('.'): 
                 log.warning("Skipping hidden file/directory: '{D}'".format(D = dir))
                 continue
             # Make fileset
-            _name           = ''.join(["Autogen-", dir])
-            jobdef_filename = ''.join([self.director_path, "jobdefs", _delim, _name, ".conf"])
+            dir     = dir if dir.endswith(_delim) else dir + _delim
+            _name   = _name_from_path(dir)
+            _filename = ''.join([self.director_path, "fileset", _delim, _name, ".conf"])
             
-            _jobdef = jobdef_template.format(
+            _template = fileset_template.format(
                         NAME  = _name,
-                        TYPE  = self.TYPE,
-                        LEVEL = self.LEVEL,
-                        POOL  = self.POOL,
-                        CLIENT = self.CLIENT, 
-                        FILESET = _name, # Uses the fileset name, not the actual dir
-                        SCHEDULE = self.SCHEDULE,
-                        STORAGE = self.STORAGE,
-                        MESSAGES = self.MESSAGES, 
-                        PRIORITY = self.PRIORITY,
-                        BOOTSTRAP = self.BOOTSTRAP, 
-                        FULLBACKUPPOOL = self.FULLBACKUPPOOL,
-                        DIFFBACKUPPOOL = self.DIFFBACKUPPOOL, 
-                        INCBACKUPPOOL  = self.INCBACKUPPOOL         
+                        FILES =''.join(["    File = \"", dir,  self.symlinks, "\""])
                         )
             
-            msg = "Creating: '{F}'".format(F = jobdef_filename)
+            msg = "Creating: '{F}'".format(F = _filename)
             if self.test:  msg += " (TEST ONLY)"
             log.debug(msg)
             if self.test: 
-                print(_jobdef)
+                print(_template)
             else:
-                with open(jobdef_filename, "w") as FH: 
-                    FH.write(_fileset)
-                os.chmod(jobdef_filename, 0o755)
-                os.chown(jobdef_filename, self.diruid, self.dirgid)
+                with open(_filename, "w") as FH: 
+                    FH.write(_template)
+                os.chmod(_filename, 0o755)
+                os.chown(_filename, self.diruid, self.dirgid)
+
+    def rem_filesets(self):
+        # For now simple and dirty
+        _path = ''.join([self.director_path, "fileset", _delim])
+        for p in Path(_path).glob("Autogen-*.conf"):
+            self.controlled_delete(p)
+
+    def gen_jobs(self):
+        """
+        DO NOT call directly. Call via DirectorTools
+        """
+        # only grab one level deep
+        for dir in self.dir_list:
+            if dir.startswith('.'): 
+                log.warning("Skipping hidden file/directory: '{D}'".format(D = dir))
+                continue
+            # Make fileset
+            dir     = dir if dir.endswith(_delim) else dir + _delim
+            _name   = _name_from_path(dir)
+            _filename = ''.join([self.director_path, "job", _delim, _name, ".conf"])
+            
+            _template = job_template.format(
+                        NAME    = _name,
+                        FILESET = _name,
+                        JOBDEF  = _name,
+                        )
+            
+            msg = "Creating: '{F}'".format(F = _filename)
+            if self.test:  msg += " (TEST ONLY)"
+            log.debug(msg)
+            if self.test: 
+                print(_template)
+            else:
+                with open(_filename, "w") as FH: 
+                    FH.write(_template)
+                os.chmod(_filename, 0o755)
+                os.chown(_filename, self.diruid, self.dirgid)
+
+    def rem_jobs(self):
+        # For now simple and dirty
+        _path = ''.join([self.director_path, "job", _delim])
+        for p in Path(_path).glob("Autogen-*.conf"):
+            self.controlled_delete(p)
 
 
 class DirectorTools(gen_bareos):
-    def __init__(self, parser = {}, *args, **kwargs):
+    def __init__(self, parser = {}, *args, **kwargs):        
+        # Always set the defaults via the @property
+        if isinstance(parser, ArgumentParser):
+            parser.add_argument('--type', action='store', dest="TYPE", type=str, default = None, help='Type of job (Backup, Archive, etc. DEFAULT: Backup')
+            parser.add_argument('--level', action='store', dest="LEVEL", type=str, default = None, help='Type of job (Full, Incremental, Differential. DEFAULT: Full')
+            parser.add_argument('--pool', action='store', dest="POOL", type=str, default = None, help='Which storage pool to use. DEFAULT: <Same as level>')
+            parser.add_argument('--client', action='store', dest="CLIENT", type=str, default = None, help='The backup client. DEFAULT: phobos-fd')
+            parser.add_argument('--schedule', action='store', dest="SCHEDULE", type=str, default = None, help='Set the scheduling (for jobdefs only)')
+            parser.add_argument('--storage', action='store', dest="STORAGE", type=str, default = None, help='Set the storage medium. DEFAULT: Tape')
+            parser.add_argument('--messages', action='store', dest="MESSAGES", type=str, default = None, help='Messages setting for jobdefs.')
+            parser.add_argument('--priority', action='store', dest="PRIORITY", type=int, default = None, help='Priority setting for jobdefs.')
+            parser.add_argument('--bootstrap', action='store', dest="BOOTSTRAP", type=str, default = None,help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
+            parser.add_argument('--fullbackuppool', action='store', dest="FULLBACKUPPOOL", type=str, default = None, help='The generic "Full" backup pool.')
+            parser.add_argument('--diffbackuppool', action='store', dest="DIFFBACKUPPOOL", type=str, default = None, help='The generic "Differential" backup pool.')
+            parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = None, help='The generic "Incremental" backup pool.')
+            
         self.parser = parser
         self.args   = args
         self.kwargs = kwargs
+        
         super().__init__(parser, args, kwargs)
+
+        # Always set the defaults via the @property
+        self.backup_type = kwargs.get("TYPE",  None) 
+        self.level = kwargs.get("LEVEL",  None) 
+        self.pool = kwargs.get("POOL",  None) 
+        self.client = kwargs.get("CLIENT",  None) 
+        self.schedule = kwargs.get("SCHEDULE",  None) 
+        self.storage = kwargs.get("STORAGE",  None) 
+        self.messages = kwargs.get("MESSAGES",  None) 
+        self.priority = kwargs.get("PRIORITY",  None) 
+        self.bootstrap = kwargs.get("BOOTSTRAP",  None) 
+        self.fullbackuppool = kwargs.get("FULLBACKUPPOOL",  None) 
+        self.diffbackuppool = kwargs.get("DIFFBACKUPPOOL",  None) 
+        self.incbackuppool = kwargs.get("INCBACKUPPOOL",  None) 
+        
         self.main()
                 
+#===============================================================================
+#     @property
+#     def jobdefs(self):
+#         try: return self.JOBDEFS
+#         except (AttributeError, KeyError, ValueError) as e:
+#             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.info(err)
+# #             raise ValueError(err)
+#             return False
+#         
+#     @jobdefs.setter
+#     def jobdefs(self, value):
+#         if value is None: value = None
+#         if value:   self.JOBDEFS = True
+#         else:       self.JOBDEFS = False
+#                     
+#     @jobdefs.deleter
+#     def jobdefs(self):
+#         del self.JOBDEFS
+#     
+#     @property
+#     def filesets(self):
+#         try: return self.FILESETS
+#         except (AttributeError, KeyError, ValueError) as e:
+#             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.info(err)
+# #             raise ValueError(err)
+#             return False
+#         
+#     @filesets.setter
+#     def filesets(self, value):
+#         if value is None: value = None
+#         if value:   self.FILESETS = True
+#         else:       self.FILESETS = False
+#                     
+#     @filesets.deleter
+#     def filesets(self):
+#         del self.FILESETS
+#===============================================================================
+
     @property
-    def jobdefs(self):
-        try: return self.JOBDEFS
+    def backup_type(self):
+        try: return self.TYPE
         except (AttributeError, KeyError, ValueError) as e:
             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
             log.info(err)
-#             raise ValueError(err)
-            return False
+            raise ValueError(err)
+#             return False
         
-    @jobdefs.setter
-    def jobdefs(self, value):
-        if value is None: value = None
-        if value:   self.JOBDEFS = True
-        else:       self.JOBDEFS = False
-                    
-    @jobdefs.deleter
-    def jobdefs(self):
-        del self.JOBDEFS
+    @backup_type.setter
+    def backup_type(self, value):
+        if value is None: value = "Backup"
+        _value = str(value).upper().strip()
+        if   value.startswith("B"):   self.TYPE = "Backup"
+        elif value.startswith("A"):   self.TYPE = "Archive"
+        else:
+            err = "The value for attribute {A} does not appear to be valid ('{V}'). Valid types are 'Backup' or 'Archive'".format(A = str(stack()[0][3]), V = str(value))
+            raise ValueError(err)
+        
+    @backup_type.deleter
+    def backup_type(self):
+        del self.TYPE
+    
+    @property
+    def client(self):
+        try: return self.CLIENT
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @client.setter
+    def client(self, value):
+        if value is None: value = "phobos-fd"
+        _value = str(value)
+        # For now, accept at face value. Maybe add check with pybareos later. 
+        self.CLIENT = _value
 
+    @client.deleter
+    def client(self):
+        del self.CLIENT
+
+    @property
+    def level(self):
+        try: return self.LEVEL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @level.setter
+    def level(self, value):
+        if value is None: value = "Full"
+        _value = str(value).upper().strip()
+        if   value.startswith("F"):   self.LEVEL = "Full"
+        elif value.startswith("D"):   self.LEVEL = "Differential"
+        elif value.startswith("I"):   self.LEVEL = "Incremental"
+        else:
+            err = "The value for attribute {A} does not appear to be valid ('{V}'). Valid types are 'Full', 'Differential', or 'Incremental'".format(A = str(stack()[0][3]), V = str(value))
+            raise ValueError(err)
+        
+    @level.deleter
+    def level(self):
+        del self.LEVEL
+
+    @property
+    def pool(self):
+        try: return self.POOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @pool.setter
+    def pool(self, value):
+        if value is None:
+            try:  value = self.LEVEL
+            except AttributeError as e:
+                err = "Unable to set determine the value for {A} from either passed in value '{V}' or the parameter '--type'. ".format(A = str(stack()[0][3]), V = str(value))
+        _value = str(value)
+        # Assume OK since there can be many pools. Maybe validate later using pybareos or something
+        self.POOL = _value
+        
+    @pool.deleter
+    def pool(self):
+        del self.POOL
+
+# parser.add_argument('--schedule', action='store', dest="SCHEDULE", type=str, default = "", help='Set the scheduling (for jobdefs only)')
+
+    @property
+    def schedule(self):
+        try: return self.SCHEDULE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @schedule.setter
+    def schedule(self, value):
+        if value is None: value = ""
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.SCHEDULE = _value
+        
+    @schedule.deleter
+    def schedule(self):
+        del self.SCHEDULE
+
+# parser.add_argument('--storage', action='store', dest="STORAGE", type=str, default = "Tape", help='Set the storage medium. DEFAULT: Tape')
+
+    @property
+    def storage(self):
+        try: return self.STORAGE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @storage.setter
+    def storage(self, value):
+        if value is None: value = "Tape"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.STORAGE = _value
+        
+    @storage.deleter
+    def storage(self):
+        del self.STORAGE
+
+# parser.add_argument('--messages', action='store', dest="MESSAGES", type=str, default = None, help='Messages setting for jobdefs.')
+
+    @property
+    def messages(self):
+        try: return self.MESSAGES
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @messages.setter
+    def messages(self, value):
+        if value is None: value = "Standard"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.MESSAGES = _value
+        
+    @messages.deleter
+    def messages(self):
+        del self.MESSAGES
+
+# parser.add_argument('--priority', action='store', dest="PRIORITY", type=int, default = 10, help='Priority setting for jobdefs.')
+
+    @property
+    def priority(self):
+        try: return self.PRIORITY
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @priority.setter
+    def priority(self, value):
+        if value is None: value = 10
+        try: _value = int(value)
+        except ValueError as e:
+            err = "Cannot set attribute {A} to value '{V}'. Value must be an integer.".format(A = str(stack()[0][3]), V = str(value))
+        # Assume OK. Maybe validate later using pybareos or something
+        self.PRIORITY = _value
+        
+    @priority.deleter
+    def priority(self):
+        del self.PRIORITY
+
+# parser.add_argument('--bootstrap', action='store', dest="BOOTSTRAP", type=str, default = "/var/lib/bareos/%c.bsr",help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
+
+    @property
+    def bootstrap(self):
+        try: return self.BOOTSTRAP
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @bootstrap.setter
+    def bootstrap(self, value):
+        if value is None: value = "/var/lib/bareos/%c.bsr"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.BOOTSTRAP = _value
+        
+    @bootstrap.deleter
+    def bootstrap(self):
+        del self.BOOTSTRAP
+
+# parser.add_argument('--fullbackuppool', action='store', dest="FULLBACKUPPOOL", type=str, default = "Full", help='The generic "Full" backup pool.')
+
+    @property
+    def fullbackuppool(self):
+        try: return self.FULLBACKUPPOOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @fullbackuppool.setter
+    def fullbackuppool(self, value):
+        if value is None: value = "Full"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.FULLBACKUPPOOL = _value
+        
+    @fullbackuppool.deleter
+    def fullbackuppool(self):
+        del self.FULLBACKUPPOOL
+
+# parser.add_argument('--diffbackuppool', action='store', dest="DIFFBACKUPPOOL", type=str, default = "Differential", help='The generic "Differential" backup pool.')
+
+    @property
+    def diffbackuppool(self):
+        try: return self.DIFFBACKUPPOOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @diffbackuppool.setter
+    def diffbackuppool(self, value):
+        if value is None: value = "Weekly-Differential"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.DIFFBACKUPPOOL = _value
+        
+    @diffbackuppool.deleter
+    def diffbackuppool(self):
+        del self.DIFFBACKUPPOOL
+
+# parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = "Incremental", help='The generic "Incremental" backup pool.')
+
+    @property
+    def incbackuppool(self):
+        try: return self.INCBACKUPPOOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @incbackuppool.setter
+    def incbackuppool(self, value):
+        if value is None: value = "Daily-Incremental"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.INCBACKUPPOOL = _value
+        
+    @incbackuppool.deleter
+    def incbackuppool(self):
+        del self.INCBACKUPPOOL
+    
     @property
     def generate(self):
         try: return self.GENERATE
@@ -528,14 +1032,30 @@ class DirectorTools(gen_bareos):
     
     def main(self):
         """"""
-        if self.directory:  log.info("directory = '{D}'".format(D = self.DIRECTORY))
-        if self.jobdefs:    log.info("jobdefs = '{D}'".format(D = self.JOBDEFS))
-        if self.generate:   log.info("generate = '{D}'".format(D = self.GENERATE))
-        if self.remove:     log.info("remove = '{D}'".format(D = self.REMOVE))
+        if self.directory:      log.info("directory = '{D}'".format(D = self.DIRECTORY))
+        if self.director_path:  log.info("director_path = '{D}'".format(D = self.DIRECTORPATH))
+        if self.remove:         log.info("remove = '{D}'".format(D = self.REMOVE))
+        if self.generate:       log.info("generate = '{D}'".format(D = self.GENERATE))
         log.info("test = '{D}'".format(D = self.test))
-        dir_list = self.get_dir_list()
-        gen_jobdefs( dir_list = dir_list, test = self.test)
-        # Check oppositions
+
+        self.dir_list = self.get_dir_list()
+        if self.generate: 
+            self.gen_jobdefs()
+            self.gen_filesets()
+            self.gen_jobs()
+
+        elif self.remove: 
+            self.rem_jobdefs()
+            self.rem_filesets()
+            self.rem_jobs()
+            
+        else:
+            err = ''.join(["No main command action called. \n", 
+                           "Please use '--generate' to create the job files. \n",
+                           "or         '--remove' to delete the job files. \n",
+                           ])
+            log.error(err)
+            raise RuntimeError(err)
         
     
 if __name__ == '__main__':
