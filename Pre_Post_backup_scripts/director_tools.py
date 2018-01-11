@@ -108,7 +108,70 @@ def _name_from_path(dir):
     return ''.join(["Autogen-", str(dir).replace(_delim, "_").strip("_")])
 
     
-class gen_bareos(metaclass=abc.ABCMeta):
+class ABC_bareos(metaclass=abc.ABCMeta):
+    """
+    :NAME:
+        ABC_bareos (Abstract class)
+        
+    :DESCRIPTION:
+        ABC_bareos is an abstract class for scripts used by the Bareos backup
+        tool. It sets the common properties and methods expected to be common 
+        for most if not all scripts. 
+        
+        IF A NEW SCRIPT DEFINES A PROPERTY OR METHOD that will be useful to 
+        many or all Bareos scripting tools, PLEASE PUT IT HERE.
+        
+    :PROPERTIES:
+        directory:  The directory upon which the script will be enacted. When 
+                    a direcctory is a mandatory property, failure to provide 
+                    the parameter at instantiation will raise an error.
+                    
+                    E.g. To generate "jobdefs" files, a directorry is parsed,
+                    and a "jobdefs" file is created for each top-level 
+                    sub-directoy.
+                    DEFAULT. (No default)   
+                    
+        director_path: The path in which lives the Bareos Director's 
+                       configuration files.                        
+                       DEFAULT: /etc/bareos/bareos-dir.d 
+        
+        dirgid:    The numeric Group ID (GID) for the Bareos Director user. 
+                   DEFAULT: (Obtained from "bareos" group in /etc/group)
+        
+        
+        diruid:    The numeric User ID (UID) for the Bareos Director user. 
+                   DEFAULT: (Obtained from "bareos" user in /etc/passwd)
+
+        logfile:   The FULL PATH to the logfile. 
+                   DEFAULT: "./<subclass_name>.log"
+        
+        log_level: The log level based on the Python "logging" package. 
+                   DEFAULT: 10
+                   
+        screendump: If "True", all logging lines are also sent to STDOUT.
+                    DEFAULT: True
+                    
+        create_paths: (Logging only) If a path (such as to the logfile) does not
+                      exits, automaticall create it
+                      DEFAULT: True
+                      
+        symlinks:    When creating Baroe files (specifically the fileset), if 
+                     "symlinks" is True, create the file to follow symlinks. 
+                     E.g. "/dir1/dir2/." (with period) include symlinks.
+                          "/dir1/dir2/" (WITHOUT period) do not include symlinks
+        
+    :METHODS:
+        controlled_delete: Allows a controlled process when deleting 
+                           automatically created files (such as filesets or 
+                           jobdefs). 
+                           
+                           This method can be over-ridden as needed within 
+                           child-classes to obtain the desireed delete results. 
+                           
+                           DEFAULT BEHAVIOR: Actually move the file being
+                           deleted to /tmp/ for later permanent removal. 
+            
+    """
     def __init__(self, parser = {}, *args, **kwargs):
         self.app_name = self.__class__.__name__
 #         self.CONF   = ConfigHandler()# ConfigHandler disabled until py3 update
@@ -119,8 +182,6 @@ class gen_bareos(metaclass=abc.ABCMeta):
             parser.add_argument('--directory', action="store", dest="DIRECTORY", type=str, default = None, help='The directory upon which action is based. (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir')
             parser.add_argument('--director-path', action="store", dest="DIRECTORPATH", type=str, default = None, help='The directory upon which action is based. (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir')
             parser.add_argument('--full', action='store_true', dest="FULL", help='Run a Full backup  ')
-            parser.add_argument('--generate', action='store_true', dest="GENERATE", help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
-            parser.add_argument('--remove', action='store_true', dest="REMOVE", help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
             parser.add_argument('--logfile', '-L', action="store", dest="LOGFILE", type=str, default = None, help='Logfile file name or full path.\nDEFAULT: ./classname.log')
             parser.add_argument('--log-level', '-l', action="store", dest="LOGLEVEL", type=str, default = None, help='Logging level.\nDEFAULT: 10.')
             parser.add_argument('--screendump', '-S', action="store", dest="SCREENDUMP", type=str, default = None, help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
@@ -167,8 +228,6 @@ class gen_bareos(metaclass=abc.ABCMeta):
         #ONLY the params local to this class. Subcleasses do their own
         self.directory      = kwargs.get("DIRECTORY",   None)
         self.director_path  = kwargs.get("DIRECTORPATH",None)
-        self.generate       = kwargs.get("GENERATE",    None)
-        self.remove         = kwargs.get("REMOVE",      None)
         self.diruid         = kwargs.get("DIRUID",      None)
         self.dirgid         = kwargs.get("DIRGID",      None)
         self.symlinks       = kwargs.get("SYMLINKS",    None)
@@ -277,6 +336,24 @@ class gen_bareos(metaclass=abc.ABCMeta):
 #===============================================================================
 
     @property
+    def create_paths(self):
+        try: return self.CREATEPATHS
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @create_paths.setter
+    def create_paths(self, value):
+        if value is None: value = True
+        if value:   self.CREATEPATHS = True
+        else:       self.CREATEPATHS = False
+                    
+    @create_paths.deleter
+    def create_paths(self):
+        del self.CREATEPATHS
+    
+    @property
     def directory(self):
         try: return self.DIRECTORY
         except (AttributeError, KeyError, ValueError) as e:
@@ -287,9 +364,11 @@ class gen_bareos(metaclass=abc.ABCMeta):
     @directory.setter
     def directory(self, value):
         if value is None: 
-            err = "There is no default directory. Value cannot be 'None'"
-            log.error(err)
-            raise ValueError(err)
+            err = "Parameter '{A}' has been set to 'None'. This may cause an error for certain operations.".format(A = str(stack()[0][3]))
+            log.warning(err)
+            self.DIRECTORY = value
+            return
+#             raise ValueError(err)
          
         _value = str(value)
         # Do checks and such here
@@ -330,6 +409,58 @@ class gen_bareos(metaclass=abc.ABCMeta):
         del self.DIRECTORPATH
     
     @property
+    def dirgid(self):
+        try: return self.DIRGID
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @dirgid.setter
+    def dirgid(self, value):
+        if value is None: 
+            value = "bareos"
+            err = "Attribute {A} cannot be set to 'None'. Using default value of '{V}'".format(A = str(stack()[0][3]), V = value)
+            log.warning(err)
+        # Do checks and such here
+        try:  self.DIRGID = int(value)
+        except ValueError as e:
+            try: self.DIRGID = grp.getgrnam(str(value)).gr_gid 
+            except KeyError as e:
+                err = "Unable to set Director gid from value '{V}'.".format(V = str(value))
+                raise ValueError(err)
+
+    @dirgid.deleter
+    def dirgid(self):
+        del self.DIRGID
+
+    @property
+    def diruid(self):
+        try: return self.DIRUID
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @diruid.setter
+    def diruid(self, value):
+        if value is None: 
+            value = "bareos"
+            err = "Attribute {A} cannot be set to 'None'. Using default value of '{V}'".format(A = str(stack()[0][3]), V = value)
+            log.warning(err)
+        # Do checks and such here
+        try:  self.DIRUID = int(value)
+        except ValueError as e:
+            try: self.DIRUID = pwd.getpwnam(str(value)).pw_uid 
+            except KeyError as e:
+                err = "Unable to set Director uid from value '{V}'.".format(V = str(value))
+                raise ValueError(err)
+
+    @diruid.deleter
+    def diruid(self):
+        del self.DIRUID
+
+    @property
     def logfile(self):
         try: return self.LOGFILE
         except (AttributeError, KeyError, ValueError) as e:
@@ -341,7 +472,7 @@ class gen_bareos(metaclass=abc.ABCMeta):
     def logfile(self, value):
         if value is None: value = ''.join(["./", self.app_name, ".log"])
         _value  = str(value)
-        _dir    = ntpath.dirname(_value)
+        _dir    = ntpath.dirname(_value) + _delim
         _file   = ntpath.basename(_value)
         _basefilename, _ext = os.path.splitext(_file)
         # Do checks and such here
@@ -400,76 +531,6 @@ class gen_bareos(metaclass=abc.ABCMeta):
         del self.SCREENDUMP
 
     @property
-    def create_paths(self):
-        try: return self.CREATEPATHS
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.error(err)
-            raise ValueError(err)
-        
-    @create_paths.setter
-    def create_paths(self, value):
-        if value is None: value = True
-        if value:   self.CREATEPATHS = True
-        else:       self.CREATEPATHS = False
-                    
-    @create_paths.deleter
-    def create_paths(self):
-        del self.CREATEPATHS
-    
-    @property
-    def diruid(self):
-        try: return self.DIRUID
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.error(err)
-            raise ValueError(err)
-        
-    @diruid.setter
-    def diruid(self, value):
-        if value is None: 
-            value = "bareos"
-            err = "Attribute {A} cannot be set to 'None'. Using default value of '{V}'".format(A = str(stack()[0][3]), V = value)
-            log.warning(err)
-        # Do checks and such here
-        try:  self.DIRUID = int(value)
-        except ValueError as e:
-            try: self.DIRUID = pwd.getpwnam(str(value)).pw_uid 
-            except KeyError as e:
-                err = "Unable to set Director uid from value '{V}'.".format(V = str(value))
-                raise ValueError(err)
-
-    @diruid.deleter
-    def diruid(self):
-        del self.DIRUID
-
-    @property
-    def dirgid(self):
-        try: return self.DIRGID
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.error(err)
-            raise ValueError(err)
-        
-    @dirgid.setter
-    def dirgid(self, value):
-        if value is None: 
-            value = "bareos"
-            err = "Attribute {A} cannot be set to 'None'. Using default value of '{V}'".format(A = str(stack()[0][3]), V = value)
-            log.warning(err)
-        # Do checks and such here
-        try:  self.DIRGID = int(value)
-        except ValueError as e:
-            try: self.DIRGID = grp.getgrnam(str(value)).gr_gid 
-            except KeyError as e:
-                err = "Unable to set Director gid from value '{V}'.".format(V = str(value))
-                raise ValueError(err)
-
-    @dirgid.deleter
-    def dirgid(self):
-        del self.DIRGID
-
-    @property
     def symlinks(self):
         try: return self.SYMLINKS
         except (AttributeError, KeyError, ValueError) as e:
@@ -490,13 +551,13 @@ class gen_bareos(metaclass=abc.ABCMeta):
     def controlled_delete(self, p):
         _p = str(p)
         msg = "DELETING FILE: '{P}'".format(P = _p)
+        if self.test: msg  += "(test only)" 
         log.warning(msg)
 
         filename = ntpath.basename(_p)
         lastdir  = ntpath.dirname(_p)
         lastdir  = lastdir.split(_delim)
         lastdir  = lastdir[len(lastdir)-1]
-        print("lastdir=", lastdir)         
         tmpdir   = os.path.join(tempfile.gettempdir(), "bareos_director_deletes", lastdir)
 
         if not os.path.isdir(tmpdir):
@@ -509,55 +570,466 @@ class gen_bareos(metaclass=abc.ABCMeta):
         dst = os.path.join(tmpdir, filename)
             
 #         print("Copy from '{P}' to '{D}'".format(P = _p, D = dst) )
-        copyfile(p, dst)        
-        p.unlink()
+        msg = "copyfile({P}, {D})' ...".format(P = str(p), D = dst)
+        if self.test: msg += "OK (test only)"
+        else:
+            try: 
+                copyfile(str(p), dst)
+                msg += "OK"
+                log.debug(msg)        
+            except Exception as e:
+                msg += "FAILED! (ERROR: {E})".format(E=str(e))
+                log.error(msg)        
+                
+        msg = "{P}.unlink ...".format(P = str(p))
+        if self.test: msg += "OK (test only)"
+        else:
+            try: 
+                p.unlink()
+                msg += "OK"
+                log.debug(msg)        
+            except Exception as e:
+                msg += "FAILED! (ERROR: {E})".format(E=str(e))
+                log.error(msg)        
 
-    def gen_jobdefs(self):
-        """
-        DO NOT call directly. Call via DirectorTools
-        """
-        # only grab one level deep
-        for dir in self.dir_list:
+
+class DirectorTools(ABC_bareos):
+    """
+    :NAME:
+        DirectorTools
+        
+    :DESCRIPTION:
+        DirectorTools is an all-encompassing script for manipulating Bareos
+        with specific tasks. 
+        
+    :PROPERTIES:
+    
+    :PUBLIC METHODS:
+    
+    :PRIVATE METHODS:
+                           
+        gen_filesets:    (Generate filesets) Creates the "filesets" config files 
+                         for the directory set in the "directory" property.
+                         
+                          
+        rem_filesets:    (Remove filesets) Deletes the "filesets" config files 
+                         for the directory set in the "directory" property.
+                         Uses the "controlled_delete" method. 
+                          
+        gen_jobs:        (Generate jobs) Creates the "job" config files 
+                         for the directory set in the "directory" property.
+        
+        rem_jobs:        (Remove jobs) Deletes the "job" config files 
+                         for the directory set in the "directory" property.
+                         Uses the "controlled_delete" method.
+        
+        gen_jobdefs:    (Generate jobdefs) Creates the "jobdefs" config files 
+                         for the directory set in the "directory" property.
+        
+        rem_jobdefs:    (Remove jobdefs) Deletes the "jobdefs" config files 
+                         for the directory set in the "directory" property.
+                         Uses the "controlled_delete" method.    
+    """
+    def __init__(self, parser = {}, *args, **kwargs):        
+        # Always set the defaults via the @property
+        if isinstance(parser, ArgumentParser):
+            parser.add_argument('--generate', action='store_true', dest="GENERATE", help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
+            parser.add_argument('--remove', action='store_true', dest="REMOVE", help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
+            parser.add_argument('--type', action='store', dest="TYPE", type=str, default = None, help='Type of job (Backup, Archive, etc. DEFAULT: Backup')
+            parser.add_argument('--level', action='store', dest="LEVEL", type=str, default = None, help='Type of job (Full, Incremental, Differential. DEFAULT: Full')
+            parser.add_argument('--pool', action='store', dest="POOL", type=str, default = None, help='Which storage pool to use. DEFAULT: <Same as level>')
+            parser.add_argument('--client', action='store', dest="CLIENT", type=str, default = None, help='The backup client. DEFAULT: phobos-fd')
+            parser.add_argument('--schedule', action='store', dest="SCHEDULE", type=str, default = None, help='Set the scheduling (for jobdefs only)')
+            parser.add_argument('--storage', action='store', dest="STORAGE", type=str, default = None, help='Set the storage medium. DEFAULT: Tape')
+            parser.add_argument('--messages', action='store', dest="MESSAGES", type=str, default = None, help='Messages setting for jobdefs.')
+            parser.add_argument('--priority', action='store', dest="PRIORITY", type=int, default = None, help='Priority setting for jobdefs.')
+            parser.add_argument('--bootstrap', action='store', dest="BOOTSTRAP", type=str, default = None,help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
+            parser.add_argument('--fullbackuppool', action='store', dest="FULLBACKUPPOOL", type=str, default = None, help='The generic "Full" backup pool.')
+            parser.add_argument('--diffbackuppool', action='store', dest="DIFFBACKUPPOOL", type=str, default = None, help='The generic "Differential" backup pool.')
+            parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = None, help='The generic "Incremental" backup pool.')
+            
+        super().__init__(parser, args, kwargs)
+
+        # Always set the defaults via the @property
+        self.backup_type    = self.kwargs.get("TYPE",            None) 
+        self.level          = self.kwargs.get("LEVEL",           None) 
+        self.pool           = self.kwargs.get("POOL",            None) 
+        self.client         = self.kwargs.get("CLIENT",          None) 
+        self.schedule       = self.kwargs.get("SCHEDULE",        None) 
+        self.storage        = self.kwargs.get("STORAGE",         None) 
+        self.messages       = self.kwargs.get("MESSAGES",        None) 
+        self.priority       = self.kwargs.get("PRIORITY",        None) 
+        self.bootstrap      = self.kwargs.get("BOOTSTRAP",       None) 
+        self.fullbackuppool = self.kwargs.get("FULLBACKUPPOOL",  None) 
+        self.diffbackuppool = self.kwargs.get("DIFFBACKUPPOOL",  None) 
+        self.incbackuppool  = self.kwargs.get("INCBACKUPPOOL",   None) 
+        self.generate       = self.kwargs.get("GENERATE",        False) 
+        self.remove         = self.kwargs.get("REMOVE",          False) 
+        
+        self.main()
+                
+#===============================================================================
+#     @property
+#     def jobdefs(self):
+#         try: return self.JOBDEFS
+#         except (AttributeError, KeyError, ValueError) as e:
+#             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.info(err)
+# #             raise ValueError(err)
+#             return False
+#         
+#     @jobdefs.setter
+#     def jobdefs(self, value):
+#         if value is None: value = None
+#         if value:   self.JOBDEFS = True
+#         else:       self.JOBDEFS = False
+#                     
+#     @jobdefs.deleter
+#     def jobdefs(self):
+#         del self.JOBDEFS
+#     
+#     @property
+#     def filesets(self):
+#         try: return self.FILESETS
+#         except (AttributeError, KeyError, ValueError) as e:
+#             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+#             log.info(err)
+# #             raise ValueError(err)
+#             return False
+#         
+#     @filesets.setter
+#     def filesets(self, value):
+#         if value is None: value = None
+#         if value:   self.FILESETS = True
+#         else:       self.FILESETS = False
+#                     
+#     @filesets.deleter
+#     def filesets(self):
+#         del self.FILESETS
+#===============================================================================
+
+    @property
+    def backup_type(self):
+        try: return self.TYPE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @backup_type.setter
+    def backup_type(self, value):
+        if value is None: value = "Backup"
+        _value = str(value).upper().strip()
+        if   value.startswith("B"):   self.TYPE = "Backup"
+        elif value.startswith("A"):   self.TYPE = "Archive"
+        else:
+            err = "The value for attribute {A} does not appear to be valid ('{V}'). Valid types are 'Backup' or 'Archive'".format(A = str(stack()[0][3]), V = str(value))
+            raise ValueError(err)
+        
+    @backup_type.deleter
+    def backup_type(self):
+        del self.TYPE
+    
+    @property
+    def bootstrap(self):
+        try: return self.BOOTSTRAP
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @bootstrap.setter
+    def bootstrap(self, value):
+        if value is None: value = "/var/lib/bareos/%c.bsr"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.BOOTSTRAP = _value
+        
+    @bootstrap.deleter
+    def bootstrap(self):
+        del self.BOOTSTRAP
+
+# parser.add_argument('--fullbackuppool', action='store', dest="FULLBACKUPPOOL", type=str, default = "Full", help='The generic "Full" backup pool.')
+
+    @property
+    def client(self):
+        try: return self.CLIENT
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @client.setter
+    def client(self, value):
+        if value is None: value = "phobos-fd"
+        _value = str(value)
+        # For now, accept at face value. Maybe add check with pybareos later. 
+        self.CLIENT = _value
+
+    @client.deleter
+    def client(self):
+        del self.CLIENT
+
+    @property
+    def diffbackuppool(self):
+        try: return self.DIFFBACKUPPOOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @diffbackuppool.setter
+    def diffbackuppool(self, value):
+        if value is None: value = "Weekly-Differential"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.DIFFBACKUPPOOL = _value
+        
+    @diffbackuppool.deleter
+    def diffbackuppool(self):
+        del self.DIFFBACKUPPOOL
+
+# parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = "Incremental", help='The generic "Incremental" backup pool.')
+
+    @property
+    def fullbackuppool(self):
+        try: return self.FULLBACKUPPOOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @fullbackuppool.setter
+    def fullbackuppool(self, value):
+        if value is None: value = "Full"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.FULLBACKUPPOOL = _value
+        
+    @fullbackuppool.deleter
+    def fullbackuppool(self):
+        del self.FULLBACKUPPOOL
+
+# parser.add_argument('--diffbackuppool', action='store', dest="DIFFBACKUPPOOL", type=str, default = "Differential", help='The generic "Differential" backup pool.')
+
+    @property
+    def generate(self):
+        try: return self.GENERATE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+#             raise ValueError(err)
+            return False
+        
+    @generate.setter
+    def generate(self, value):
+        if value is None: 
+            if self.directory is None or self.directory == "":
+                err = "The Attribute 'directory' cannot be 'None' when using the 'generate' switch. Please specify the directory from which to generate backup config files. "
+                log.error(err)
+                raise RuntimeError(err)
+            
+        if value:   self.GENERATE = True
+        else:       self.GENERATE = False
+                    
+    @generate.deleter
+    def generate(self):
+        del self.GENERATE
+    
+    @property
+    def incbackuppool(self):
+        try: return self.INCBACKUPPOOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @incbackuppool.setter
+    def incbackuppool(self, value):
+        if value is None: value = "Daily-Incremental"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.INCBACKUPPOOL = _value
+        
+    @incbackuppool.deleter
+    def incbackuppool(self):
+        del self.INCBACKUPPOOL
+    
+    @property
+    def level(self):
+        try: return self.LEVEL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @level.setter
+    def level(self, value):
+        if value is None: value = "Full"
+        _value = str(value).upper().strip()
+        if   value.startswith("F"):   self.LEVEL = "Full"
+        elif value.startswith("D"):   self.LEVEL = "Differential"
+        elif value.startswith("I"):   self.LEVEL = "Incremental"
+        else:
+            err = "The value for attribute {A} does not appear to be valid ('{V}'). Valid types are 'Full', 'Differential', or 'Incremental'".format(A = str(stack()[0][3]), V = str(value))
+            raise ValueError(err)
+        
+    @level.deleter
+    def level(self):
+        del self.LEVEL
+
+    @property
+    def messages(self):
+        try: return self.MESSAGES
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @messages.setter
+    def messages(self, value):
+        if value is None: value = "Standard"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.MESSAGES = _value
+        
+    @messages.deleter
+    def messages(self):
+        del self.MESSAGES
+
+# parser.add_argument('--priority', action='store', dest="PRIORITY", type=int, default = 10, help='Priority setting for jobdefs.')
+
+    @property
+    def priority(self):
+        try: return self.PRIORITY
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @priority.setter
+    def priority(self, value):
+        if value is None: value = 10
+        try: _value = int(value)
+        except ValueError as e:
+            err = "Cannot set attribute {A} to value '{V}'. Value must be an integer.".format(A = str(stack()[0][3]), V = str(value))
+        # Assume OK. Maybe validate later using pybareos or something
+        self.PRIORITY = _value
+        
+    @priority.deleter
+    def priority(self):
+        del self.PRIORITY
+
+# parser.add_argument('--bootstrap', action='store', dest="BOOTSTRAP", type=str, default = "/var/lib/bareos/%c.bsr",help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
+
+    @property
+    def pool(self):
+        try: return self.POOL
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @pool.setter
+    def pool(self, value):
+        if value is None:
+            try:  value = self.LEVEL
+            except AttributeError as e:
+                err = "Unable to set determine the value for {A} from either passed in value '{V}' or the parameter '--type'. ".format(A = str(stack()[0][3]), V = str(value))
+        _value = str(value)
+        # Assume OK since there can be many pools. Maybe validate later using pybareos or something
+        self.POOL = _value
+        
+    @pool.deleter
+    def pool(self):
+        del self.POOL
+
+# parser.add_argument('--schedule', action='store', dest="SCHEDULE", type=str, default = "", help='Set the scheduling (for jobdefs only)')
+
+    @property
+    def remove(self):
+        try: return self.REMOVE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+#             raise ValueError(err)
+            return False
+        
+    @remove.setter
+    def remove(self, value):
+        if value is None: value = None
+        if value:   self.REMOVE = True
+        else:       self.REMOVE = False
+                    
+    @remove.deleter
+    def remove(self):
+        del self.REMOVE
+
+    @property
+    def schedule(self):
+        try: return self.SCHEDULE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @schedule.setter
+    def schedule(self, value):
+        if value is None: value = ""
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.SCHEDULE = _value
+        
+    @schedule.deleter
+    def schedule(self):
+        del self.SCHEDULE
+
+# parser.add_argument('--storage', action='store', dest="STORAGE", type=str, default = "Tape", help='Set the storage medium. DEFAULT: Tape')
+
+    @property
+    def storage(self):
+        try: return self.STORAGE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+#             return False
+        
+    @storage.setter
+    def storage(self, value):
+        if value is None: value = "Tape"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.STORAGE = _value
+        
+    @storage.deleter
+    def storage(self):
+        del self.STORAGE
+
+# parser.add_argument('--messages', action='store', dest="MESSAGES", type=str, default = None, help='Messages setting for jobdefs.')
+
+    def get_dir_list(self):
+        dir_list = []
+        dirs = os.listdir(self.directory)
+        for dir in dirs: 
+            full_path = ''.join([self.directory, dir, _delim])
             if dir.startswith('.'): 
-                log.warning("Skipping hidden file/directory: '{D}'".format(D = dir))
+                log.warning("Skipping hidden file/directory: '{P}'".format(P = full_path))
                 continue
-            dir     = dir if dir.endswith(_delim) else dir + _delim
-            _name   = _name_from_path(dir)
-            _filename = ''.join([self.director_path, "jobdefs", _delim, _name, ".conf"])
-            
-            _template = jobdef_template.format(
-                        NAME  = _name,
-                        TYPE  = self.backup_type,
-                        LEVEL = self.level,
-                        POOL  = self.pool,
-                        CLIENT = self.client, 
-                        FILESET = _name, # Uses the fileset name, not the actual dir
-                        SCHEDULE = self.schedule,
-                        STORAGE = self.storage,
-                        MESSAGES = self.messages, 
-                        PRIORITY = self.priority,
-                        BOOTSTRAP = self.bootstrap, 
-                        FULLBACKUPPOOL = self.fullbackuppool,
-                        DIFFBACKUPPOOL = self.diffbackuppool, 
-                        INCBACKUPPOOL  = self.incbackuppool         
-                        )
-            
-            msg = "Creating: '{F}'".format(F = _filename)
-            if self.test:  msg += " (TEST ONLY)"
-            log.debug(msg)
-            if self.test: 
-                print(_template)
-            else:
-                with open(_filename, "w") as FH: 
-                    FH.write(_template)
-                os.chmod(_filename, 0o755)
-                os.chown(_filename, self.diruid, self.dirgid)
-
-    def rem_jobdefs(self):
-        # For now simple and dirty
-        _path = ''.join([self.director_path, "jobdefs", _delim])
-        for p in Path(_path).glob("Autogen-*.conf"):
-            self.controlled_delete(p)
+            dir_list.append(full_path)
+    
+        return dir_list
 
     def gen_filesets(self):
         """
@@ -632,403 +1104,52 @@ class gen_bareos(metaclass=abc.ABCMeta):
         for p in Path(_path).glob("Autogen-*.conf"):
             self.controlled_delete(p)
 
-
-class DirectorTools(gen_bareos):
-    def __init__(self, parser = {}, *args, **kwargs):        
-        # Always set the defaults via the @property
-        if isinstance(parser, ArgumentParser):
-            parser.add_argument('--type', action='store', dest="TYPE", type=str, default = None, help='Type of job (Backup, Archive, etc. DEFAULT: Backup')
-            parser.add_argument('--level', action='store', dest="LEVEL", type=str, default = None, help='Type of job (Full, Incremental, Differential. DEFAULT: Full')
-            parser.add_argument('--pool', action='store', dest="POOL", type=str, default = None, help='Which storage pool to use. DEFAULT: <Same as level>')
-            parser.add_argument('--client', action='store', dest="CLIENT", type=str, default = None, help='The backup client. DEFAULT: phobos-fd')
-            parser.add_argument('--schedule', action='store', dest="SCHEDULE", type=str, default = None, help='Set the scheduling (for jobdefs only)')
-            parser.add_argument('--storage', action='store', dest="STORAGE", type=str, default = None, help='Set the storage medium. DEFAULT: Tape')
-            parser.add_argument('--messages', action='store', dest="MESSAGES", type=str, default = None, help='Messages setting for jobdefs.')
-            parser.add_argument('--priority', action='store', dest="PRIORITY", type=int, default = None, help='Priority setting for jobdefs.')
-            parser.add_argument('--bootstrap', action='store', dest="BOOTSTRAP", type=str, default = None,help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
-            parser.add_argument('--fullbackuppool', action='store', dest="FULLBACKUPPOOL", type=str, default = None, help='The generic "Full" backup pool.')
-            parser.add_argument('--diffbackuppool', action='store', dest="DIFFBACKUPPOOL", type=str, default = None, help='The generic "Differential" backup pool.')
-            parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = None, help='The generic "Incremental" backup pool.')
-            
-        self.parser = parser
-        self.args   = args
-        self.kwargs = kwargs
-        
-        super().__init__(parser, args, kwargs)
-
-        # Always set the defaults via the @property
-        self.backup_type = kwargs.get("TYPE",  None) 
-        self.level = kwargs.get("LEVEL",  None) 
-        self.pool = kwargs.get("POOL",  None) 
-        self.client = kwargs.get("CLIENT",  None) 
-        self.schedule = kwargs.get("SCHEDULE",  None) 
-        self.storage = kwargs.get("STORAGE",  None) 
-        self.messages = kwargs.get("MESSAGES",  None) 
-        self.priority = kwargs.get("PRIORITY",  None) 
-        self.bootstrap = kwargs.get("BOOTSTRAP",  None) 
-        self.fullbackuppool = kwargs.get("FULLBACKUPPOOL",  None) 
-        self.diffbackuppool = kwargs.get("DIFFBACKUPPOOL",  None) 
-        self.incbackuppool = kwargs.get("INCBACKUPPOOL",  None) 
-        
-        self.main()
-                
-#===============================================================================
-#     @property
-#     def jobdefs(self):
-#         try: return self.JOBDEFS
-#         except (AttributeError, KeyError, ValueError) as e:
-#             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-#             log.info(err)
-# #             raise ValueError(err)
-#             return False
-#         
-#     @jobdefs.setter
-#     def jobdefs(self, value):
-#         if value is None: value = None
-#         if value:   self.JOBDEFS = True
-#         else:       self.JOBDEFS = False
-#                     
-#     @jobdefs.deleter
-#     def jobdefs(self):
-#         del self.JOBDEFS
-#     
-#     @property
-#     def filesets(self):
-#         try: return self.FILESETS
-#         except (AttributeError, KeyError, ValueError) as e:
-#             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-#             log.info(err)
-# #             raise ValueError(err)
-#             return False
-#         
-#     @filesets.setter
-#     def filesets(self, value):
-#         if value is None: value = None
-#         if value:   self.FILESETS = True
-#         else:       self.FILESETS = False
-#                     
-#     @filesets.deleter
-#     def filesets(self):
-#         del self.FILESETS
-#===============================================================================
-
-    @property
-    def backup_type(self):
-        try: return self.TYPE
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @backup_type.setter
-    def backup_type(self, value):
-        if value is None: value = "Backup"
-        _value = str(value).upper().strip()
-        if   value.startswith("B"):   self.TYPE = "Backup"
-        elif value.startswith("A"):   self.TYPE = "Archive"
-        else:
-            err = "The value for attribute {A} does not appear to be valid ('{V}'). Valid types are 'Backup' or 'Archive'".format(A = str(stack()[0][3]), V = str(value))
-            raise ValueError(err)
-        
-    @backup_type.deleter
-    def backup_type(self):
-        del self.TYPE
-    
-    @property
-    def client(self):
-        try: return self.CLIENT
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @client.setter
-    def client(self, value):
-        if value is None: value = "phobos-fd"
-        _value = str(value)
-        # For now, accept at face value. Maybe add check with pybareos later. 
-        self.CLIENT = _value
-
-    @client.deleter
-    def client(self):
-        del self.CLIENT
-
-    @property
-    def level(self):
-        try: return self.LEVEL
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @level.setter
-    def level(self, value):
-        if value is None: value = "Full"
-        _value = str(value).upper().strip()
-        if   value.startswith("F"):   self.LEVEL = "Full"
-        elif value.startswith("D"):   self.LEVEL = "Differential"
-        elif value.startswith("I"):   self.LEVEL = "Incremental"
-        else:
-            err = "The value for attribute {A} does not appear to be valid ('{V}'). Valid types are 'Full', 'Differential', or 'Incremental'".format(A = str(stack()[0][3]), V = str(value))
-            raise ValueError(err)
-        
-    @level.deleter
-    def level(self):
-        del self.LEVEL
-
-    @property
-    def pool(self):
-        try: return self.POOL
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @pool.setter
-    def pool(self, value):
-        if value is None:
-            try:  value = self.LEVEL
-            except AttributeError as e:
-                err = "Unable to set determine the value for {A} from either passed in value '{V}' or the parameter '--type'. ".format(A = str(stack()[0][3]), V = str(value))
-        _value = str(value)
-        # Assume OK since there can be many pools. Maybe validate later using pybareos or something
-        self.POOL = _value
-        
-    @pool.deleter
-    def pool(self):
-        del self.POOL
-
-# parser.add_argument('--schedule', action='store', dest="SCHEDULE", type=str, default = "", help='Set the scheduling (for jobdefs only)')
-
-    @property
-    def schedule(self):
-        try: return self.SCHEDULE
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @schedule.setter
-    def schedule(self, value):
-        if value is None: value = ""
-        _value = str(value)
-        # Assume OK. Maybe validate later using pybareos or something
-        self.SCHEDULE = _value
-        
-    @schedule.deleter
-    def schedule(self):
-        del self.SCHEDULE
-
-# parser.add_argument('--storage', action='store', dest="STORAGE", type=str, default = "Tape", help='Set the storage medium. DEFAULT: Tape')
-
-    @property
-    def storage(self):
-        try: return self.STORAGE
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @storage.setter
-    def storage(self, value):
-        if value is None: value = "Tape"
-        _value = str(value)
-        # Assume OK. Maybe validate later using pybareos or something
-        self.STORAGE = _value
-        
-    @storage.deleter
-    def storage(self):
-        del self.STORAGE
-
-# parser.add_argument('--messages', action='store', dest="MESSAGES", type=str, default = None, help='Messages setting for jobdefs.')
-
-    @property
-    def messages(self):
-        try: return self.MESSAGES
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @messages.setter
-    def messages(self, value):
-        if value is None: value = "Standard"
-        _value = str(value)
-        # Assume OK. Maybe validate later using pybareos or something
-        self.MESSAGES = _value
-        
-    @messages.deleter
-    def messages(self):
-        del self.MESSAGES
-
-# parser.add_argument('--priority', action='store', dest="PRIORITY", type=int, default = 10, help='Priority setting for jobdefs.')
-
-    @property
-    def priority(self):
-        try: return self.PRIORITY
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @priority.setter
-    def priority(self, value):
-        if value is None: value = 10
-        try: _value = int(value)
-        except ValueError as e:
-            err = "Cannot set attribute {A} to value '{V}'. Value must be an integer.".format(A = str(stack()[0][3]), V = str(value))
-        # Assume OK. Maybe validate later using pybareos or something
-        self.PRIORITY = _value
-        
-    @priority.deleter
-    def priority(self):
-        del self.PRIORITY
-
-# parser.add_argument('--bootstrap', action='store', dest="BOOTSTRAP", type=str, default = "/var/lib/bareos/%c.bsr",help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
-
-    @property
-    def bootstrap(self):
-        try: return self.BOOTSTRAP
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @bootstrap.setter
-    def bootstrap(self, value):
-        if value is None: value = "/var/lib/bareos/%c.bsr"
-        _value = str(value)
-        # Assume OK. Maybe validate later using pybareos or something
-        self.BOOTSTRAP = _value
-        
-    @bootstrap.deleter
-    def bootstrap(self):
-        del self.BOOTSTRAP
-
-# parser.add_argument('--fullbackuppool', action='store', dest="FULLBACKUPPOOL", type=str, default = "Full", help='The generic "Full" backup pool.')
-
-    @property
-    def fullbackuppool(self):
-        try: return self.FULLBACKUPPOOL
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @fullbackuppool.setter
-    def fullbackuppool(self, value):
-        if value is None: value = "Full"
-        _value = str(value)
-        # Assume OK. Maybe validate later using pybareos or something
-        self.FULLBACKUPPOOL = _value
-        
-    @fullbackuppool.deleter
-    def fullbackuppool(self):
-        del self.FULLBACKUPPOOL
-
-# parser.add_argument('--diffbackuppool', action='store', dest="DIFFBACKUPPOOL", type=str, default = "Differential", help='The generic "Differential" backup pool.')
-
-    @property
-    def diffbackuppool(self):
-        try: return self.DIFFBACKUPPOOL
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @diffbackuppool.setter
-    def diffbackuppool(self, value):
-        if value is None: value = "Weekly-Differential"
-        _value = str(value)
-        # Assume OK. Maybe validate later using pybareos or something
-        self.DIFFBACKUPPOOL = _value
-        
-    @diffbackuppool.deleter
-    def diffbackuppool(self):
-        del self.DIFFBACKUPPOOL
-
-# parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = "Incremental", help='The generic "Incremental" backup pool.')
-
-    @property
-    def incbackuppool(self):
-        try: return self.INCBACKUPPOOL
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
-#             return False
-        
-    @incbackuppool.setter
-    def incbackuppool(self, value):
-        if value is None: value = "Daily-Incremental"
-        _value = str(value)
-        # Assume OK. Maybe validate later using pybareos or something
-        self.INCBACKUPPOOL = _value
-        
-    @incbackuppool.deleter
-    def incbackuppool(self):
-        del self.INCBACKUPPOOL
-    
-    @property
-    def generate(self):
-        try: return self.GENERATE
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-#             raise ValueError(err)
-            return False
-        
-    @generate.setter
-    def generate(self, value):
-        if value is None: value = None
-        if value:   self.GENERATE = True
-        else:       self.GENERATE = False
-                    
-    @generate.deleter
-    def generate(self):
-        del self.GENERATE
-    
-    @property
-    def remove(self):
-        try: return self.REMOVE
-        except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-#             raise ValueError(err)
-            return False
-        
-    @remove.setter
-    def remove(self, value):
-        if value is None: value = None
-        if value:   self.REMOVE = True
-        else:       self.REMOVE = False
-                    
-    @remove.deleter
-    def remove(self):
-        del self.REMOVE
-
-    def get_dir_list(self):
-        dir_list = []
-        dirs = os.listdir(self.directory)
-        for dir in dirs: 
-            full_path = ''.join([self.directory, dir, _delim])
+    def gen_jobdefs(self):
+        """
+        DO NOT call directly. Call via DirectorTools
+        """
+        # only grab one level deep
+        for dir in self.dir_list:
             if dir.startswith('.'): 
-                log.warning("Skipping hidden file/directory: '{P}'".format(P = full_path))
+                log.warning("Skipping hidden file/directory: '{D}'".format(D = dir))
                 continue
-            dir_list.append(full_path)
-    
-        return dir_list
+            dir     = dir if dir.endswith(_delim) else dir + _delim
+            _name   = _name_from_path(dir)
+            _filename = ''.join([self.director_path, "jobdefs", _delim, _name, ".conf"])
+            
+            _template = jobdef_template.format(
+                        NAME  = _name,
+                        TYPE  = self.backup_type,
+                        LEVEL = self.level,
+                        POOL  = self.pool,
+                        CLIENT = self.client, 
+                        FILESET = _name, # Uses the fileset name, not the actual dir
+                        SCHEDULE = self.schedule,
+                        STORAGE = self.storage,
+                        MESSAGES = self.messages, 
+                        PRIORITY = self.priority,
+                        BOOTSTRAP = self.bootstrap, 
+                        FULLBACKUPPOOL = self.fullbackuppool,
+                        DIFFBACKUPPOOL = self.diffbackuppool, 
+                        INCBACKUPPOOL  = self.incbackuppool         
+                        )
+            
+            msg = "Creating: '{F}'".format(F = _filename)
+            if self.test:  msg += " (TEST ONLY)"
+            log.debug(msg)
+            if self.test: 
+                print(_template)
+            else:
+                with open(_filename, "w") as FH: 
+                    FH.write(_template)
+                os.chmod(_filename, 0o755)
+                os.chown(_filename, self.diruid, self.dirgid)
+
+    def rem_jobdefs(self):
+        # For now simple and dirty
+        _path = ''.join([self.director_path, "jobdefs", _delim])
+        for p in Path(_path).glob("Autogen-*.conf"):
+            self.controlled_delete(p)
     
     def main(self):
         """"""
@@ -1038,8 +1159,8 @@ class DirectorTools(gen_bareos):
         if self.generate:       log.info("generate = '{D}'".format(D = self.GENERATE))
         log.info("test = '{D}'".format(D = self.test))
 
-        self.dir_list = self.get_dir_list()
-        if self.generate: 
+        if self.generate:
+            self.dir_list = self.get_dir_list()
             self.gen_jobdefs()
             self.gen_filesets()
             self.gen_jobs()
