@@ -47,7 +47,10 @@ JobDefs {{
   Write Bootstrap = "{BOOTSTRAP}"
   Full Backup Pool = {FULLBACKUPPOOL}
   Differential Backup Pool = {DIFFBACKUPPOOL} 
-  Incremental Backup Pool = {INCBACKUPPOOL} 
+  Incremental Backup Pool = {INCBACKUPPOOL}
+  Reschedule Interval = 1 minute
+  Reschedule On Error = yes
+  Reschedule Times = 5
 }}
 """
 # .format(
@@ -78,6 +81,7 @@ FileSet {{
                 Verify = 1
         }}
   {FILES}  
+  Exclude Dir Containing = .nobackup
   }}
 }}
 """
@@ -233,107 +237,6 @@ class ABC_bareos(metaclass=abc.ABCMeta):
         self.symlinks       = kwargs.get("SYMLINKS",    None)
         self.test           = True if kwargs.get("TEST", False) else False
         
-#         self._set_config(parser, args, kwargs) # NEVER REMOVE
-
-#===============================================================================
-#     def _arg_parser(self, parser):
-#         """
-#         :NAME:
-#         _arg_parser
-#         
-#         :DESCRIPTION:
-#         Put all the argparse set up lines here, for example...
-#             parser.add_argument('--switch', '-s', 
-#                                 action ="store", 
-#                                 dest   ="variable_name", type=str, default = '.', 
-#                                 help   ='Starting directory for search.'
-#                                 )
-#         
-#         :RETURNS:
-#             Returns the parser object for later use by argparse
-#             
-#         """
-#         ### ALWAYS SET DEFAULTS IN @property ##################################
-#         parser.add_argument('--directory', action="store", dest="DIRECTORY", type=str, default = False, 
-#                             help='The directory upon which action is based. (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir')
-# 
-#         
-#         
-#         
-#         parser.add_argument('--full', action='store_true', dest="FULL", #type=bool, default = False, 
-#                             help='Run a Full backup  ')
-#         parser.add_argument('--filesets', action='store_true', dest="FILESETS", #type=bool, default = False, 
-#                             help='Create/Delete jobdefs for directory in director. ')
-#         parser.add_argument('--generate', action='store_true', dest="GENERATE", #type=bool, default = False, 
-#                             help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
-#         parser.add_argument('--remove', action='store_true', dest="REMOVE", #type=bool, default = False, 
-#                             help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
-#         parser.add_argument('--logfile', '-L', action="store", dest="LOGFILE", type=str, 
-#                             help='Logfile file name or full path.\nDEFAULT: ./classname.log')
-#         parser.add_argument('--log-level', '-l', action="store", dest="LOGLEVEL", type=str, 
-#                             help='Logging level.\nDEFAULT: 10.')
-#         parser.add_argument('--screendump', '-S', action="store", dest="SCREENDUMP", type=str,  
-#                             help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
-#         parser.add_argument('--create-paths', '-C', action="store", dest="CREATEPATHS", type=str, 
-#                             help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
-#         parser.add_argument('--test', action='store_true', dest="TEST", 
-#                             help='"test" mode only. Do not perform any real actions (I.e. file writes). \nDEFAULT: False')
-#         parser.add_argument('--dir-uid', action="store", dest="DIRUID", type=str, 
-#                             help='The user ID or username of for the bareos install. \nDEFAULT: bareos')
-#         parser.add_argument('--dir-gid', action="store", dest="DIRGID", type=str, 
-#                             help='The group ID or groupname of for the bareos install. \nDEFAULT: bareos')
-# 
-#         return parser
-#     
-# #===============================================================================
-# #     def _set_config(self, parser, args, kwargs):
-# #         """"""
-# #         # Set class-wide
-# #         self.app_name = self.__class__.__name__
-# # #         self.CONF   = ConfigHandler()# ConfigHandler disabled until py3 update
-# #         self.args   = args
-# #         self.kwargs = kwargs        
-# #         # Convert parsed args to dict and add to kwargs
-# #         if isinstance(parser, ArgumentParser):
-# #             parser = self._arg_parser(parser)
-# #             parser_kwargs = parser.parse_args()
-# #             kwargs.update(vars(parser_kwargs))
-# # 
-# #         elif isinstance(parser, dict):
-# #             kwargs.update(parser)
-# #             
-# #         else:
-# #             err = "{C}.{M}: Parameter 'parser' ({P}) must be either an Argparse parser object or a dictionary. ".format(C = self.app_name, M = inspect.stack()[0][3], P = str(parser))
-# #             raise ValueError(err)
-# #         
-# #         # #=== loghandler disabled until bugfix in Jessie access to self.socket.send(msg)
-# #         # # Here we parse out any args and kwargs that are not needed within the self or self.CONF objects
-# #         # # if "flag" in args: self.flag = something
-# #         ### ALWAYS SET DEFAULTS IN @property #################################
-# #         # # Logging
-# #         self.logfile        = kwargs.get("LOGFILE",     None)
-# #         self.log_level      = kwargs.get("LOGLEVEL",    None)
-# #         self.screendump     = kwargs.get("SCREENDUMP",  None)
-# #         self.create_paths   = kwargs.get("CREATEPATHS", None)
-# #         #=== loghandler bugfix in Jessie access to self.socket.send(msg)
-# #         # Only use actual filesystem file for log for now
-# #         # Log something
-# #         log.debug("Starting  {C}...".format(C = self.app_name), 
-# #                  app_name     = self.app_name,
-# #                  logfile      = self.logfile, 
-# #                  log_level    = self.log_level, 
-# #                  screendump   = self.screendump, 
-# #                  create_paths = self.create_paths, 
-# #                  )
-# #         # Start params here
-# #         self.directory      = kwargs.get("DIRECTORY",   None)
-# #         self.generate       = kwargs.get("GENERATE",    None)
-# #         self.remove         = kwargs.get("REMOVE",      None)
-# #         self.diruid         = kwargs.get("DIRUID",      "bareos")
-# #         self.dirgid         = kwargs.get("DIRGID",      "bareos")
-# #         self.test           = True if kwargs.get("TEST", False) else False
-# #===============================================================================
-#===============================================================================
 
     @property
     def create_paths(self):
@@ -806,7 +709,7 @@ class DirectorTools(ABC_bareos):
         
     @fullbackuppool.setter
     def fullbackuppool(self, value):
-        if value is None: value = "Full"
+        if value is None: value = "6mo-Full"
         _value = str(value)
         # Assume OK. Maybe validate later using pybareos or something
         self.FULLBACKUPPOOL = _value
@@ -986,7 +889,7 @@ class DirectorTools(ABC_bareos):
         
     @schedule.setter
     def schedule(self, value):
-        if value is None: value = ""
+        if value is None: value = "RegularBackups"
         _value = str(value)
         # Assume OK. Maybe validate later using pybareos or something
         self.SCHEDULE = _value
