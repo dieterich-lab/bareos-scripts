@@ -242,7 +242,7 @@ class Search():
         conn = Connect(password  = self.password)
         paths = conn.meta.tables['path']
         FH = open(self.outfile, "w")
-        FH.write(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') + "\n")
+#         FH.write(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') + "\n")
         
         nullnames = 0
         for file in conn.ENGINE.execute("SELECT jobid, pathid, name FROM file"):
