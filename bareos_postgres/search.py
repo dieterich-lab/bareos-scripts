@@ -16,6 +16,7 @@ _delim = checks.directory_deliminator()
 obfpwd = checks.obfuscate_key # Setting as an method object
 from common.loghandler import log
 from inspect import stack
+from stat import S_IREAD, S_IRGRP, S_IROTH
 
 import atexit
 import datetime
@@ -87,6 +88,7 @@ class Search():
         try: 
             log.info(self.app_name + " complete.")
             self.FH.close()
+            os.chmod(self.outfile, S_IREAD|S_IRGRP|S_IROTH)
         except: 
             pass
         
