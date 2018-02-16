@@ -8,7 +8,6 @@ __maintainer__  = "Mike Rightmire"
 __email__       = "Michael.Rightmire@uni-heidelberg.de"
 __status__      = "Development"
 
-
 from argparse       import ArgumentParser
 from bareos_postgres import Connect
 from common.checks         import Checks
@@ -252,18 +251,20 @@ class Search():
             if len(name) < 1:
                 nullnames += 1
                 continue
-            
             else:
-                if nullnames != 0: log.info("Skipped {N} null filenames.".format(N = str(nullnames)))
+                if nullnames > 0: log.info("Skipped {N} null filenames.".format(N = str(nullnames)))
                 nullnames = 0
         
-            path   = conn.ENGINE.execute("SELECT path FROM path WHERE pathid = {P}".format(P = str(pathid))).fetchone()[0]
-            line = ''.join([str(jobid), ":", str(path) + str(name)])
-        #     print(line)
+            path     = conn.ENGINE.execute("SELECT path FROM path WHERE pathid = {P}".format(P = str(pathid))).fetchone()[0]
+            _startend = conn.ENGINE.execute("SELECT starttime, realendtime FROM job WHERE jobid = {J}".format(J = str(jobid))).fetchone()
+            _start = _startend[0].strftime('%Y-%m-%d') 
+#             _end   = _startend[1].strftime('%Y-%m-%d')
+#             startend = ''.join([_start, "-", _end])
+            line = ''.join([str(jobid), ":", _start, ":", str(path) + str(name)])
+#             print(line) #333
             try: 
                 FH.write(line + "\n")
-            except:
-#             except UnicodeEncodeError as e:
+            except UnicodeEncodeError as e:
                 line = line.encode('utf-8')
                 FH.write(str(line) + "\n")
             
