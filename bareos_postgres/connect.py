@@ -33,8 +33,8 @@ class Connect(Bareos_postgres_ABC):
     def __init__(self, parser = {}, *args, **kwargs):
         # Always set the defaults via the @property
         if isinstance(parser, ArgumentParser):
-            parser.add_argument('--user',        '-U', action="store", dest="user",       type=str, default = None, help="Database User for accessing the Bareos Postgres database. (DEFAULT: 'postgres')")
-            parser.add_argument('--password',    '-P', action="store", dest="password",        type=str, default = None, help="Database User's Password for accessing the Bareos Postgres database. (DEFAULT: 'None')")
+            parser.add_argument('--user',        '-U', action="store", dest="user",       type=str, default = None, help="Database User for accessing the Bareos Postgres database. (DEFAULT: 'bareospostgresro')")
+            parser.add_argument('--password',    '-P', action="store", dest="password",   type=str, default = None, help="Database User's Password for accessing the Bareos Postgres database. (DEFAULT: 'None')")
             parser.add_argument('--host',        '-P', action="store", dest="host",       type=str, default = None, help="Host for accessing the Bareos Postgres database. (DEFAULT: 'localhost')")
             parser.add_argument('--port',        '-p', action="store", dest="port",       type=str, default = None, help="Port for accessing the Bareos Postgres database. (DEFAULT: '5432')")
             parser.add_argument('--database',    '-P', action="store", dest="database",   type=str, default = None, help="Bareos Postgres database name to which to connect. (DEFAULT: 'bareos')")
@@ -42,10 +42,10 @@ class Connect(Bareos_postgres_ABC):
         super().__init__(parser, args, kwargs)
 
         # Always set the defaults via the @property
-        self.user       = kwargs.get("user", None)
+        self.user       = kwargs.get("user",      None)
         self.password   = kwargs.get("password" , None)
-        self.host       = kwargs.get("host" , None)
-        self.port       = kwargs.get("port" , None)
+        self.host       = kwargs.get("host" ,     None)
+        self.port       = kwargs.get("port" ,     None)
         self.database   = kwargs.get("database" , None)
         
         # We connect with the help of the PostgreSQL URL
@@ -85,7 +85,7 @@ class Connect(Bareos_postgres_ABC):
         
     @user.setter
     def user(self, value):
-        if value is None: value = "postgres"
+        if value is None: value = "bareospostgresro"
         _value = str(value)
         # Do checks and such here
         if (not _value):

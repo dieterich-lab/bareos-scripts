@@ -81,7 +81,7 @@ FileSet {{
                 Verify = 1
         }}
   {FILES}  
-  Exclude Dir Containing = .nobackup
+  Exclude Dir Containing = {EXCDIRCONTAINING}
   }}
 }}
 """
@@ -505,6 +505,15 @@ class DirectorTools(ABC_bareos):
         DirectorTools is an all-encompassing script for manipulating Bareos
         with specific tasks. 
         
+        This script can be called as a class using kwargs, such as:
+            DirectorTools(flag1, flag2, someparam = 'value')
+            
+        OR can be called as a class by passing in a list and a dict, such as: 
+            DirectorTools([flag2, flag2], {'someparam' = 'value'})
+            
+        OR it can be called from the command line using switches...
+            python3 DirectorTools.py --flag2, --flag2, --someparam value        
+        
     :PROPERTIES:
     
     :PUBLIC METHODS:
@@ -531,43 +540,74 @@ class DirectorTools(ABC_bareos):
         
         rem_jobdefs:    (Remove jobdefs) Deletes the "jobdefs" config files 
                          for the directory set in the "directory" property.
-                         Uses the "controlled_delete" method.    
+                         Uses the "controlled_delete" method.   
+                         
+    :DEVELOPER_NOTES:
+        The 'jobdef_template', 'job_template', and 'fileset_template' above is
+        what actually appears in the commensurately named 
+        /etc/bareos/bareos-dir.d/<subdirectory> as *.conf files.
+        
+        Variables are placed in the above templates as {VARNAME}
+        
+        The methods 'gen_jobdefs', 'gen_jobs', and 'gen_filesets' then replace
+        the {VARNAME}s with the appropriate self.varname property and writes
+        the *.conf file out using an auto-generated name. 
+        
+        ===
+        All script variables (self.varname) should be set by a @property. 
+        - The @property should return an error if the private self.VARNAME is
+        not set.
+         
+        - The @varname.setter should set the default value if 'None' or '' or 
+        'False' is passed in to the setter. 
+        
+        ===
+        All script variables (self.varname) MUST be initially set by going
+        through the argument_parser/dict process in the __init__ method.  
+
     """
     def __init__(self, parser = {}, *args, **kwargs):        
-        # Always set the defaults via the @property
+        # Always set the defaults via the @property.setter ONLY
+        # As an example, 
+        # parser.add_argument('--value', action='store_true', dest="value", help='Usage instructions (DEFAULT: default_value)')
+        # REMEBER THAT '--value', 'dest="value" ', and the later 
+        # @property def value(self) must all be the same word 'value', and must
+        # all be small case!
         if isinstance(parser, ArgumentParser):
-            parser.add_argument('--generate', action='store_true', dest="GENERATE", help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
-            parser.add_argument('--remove', action='store_true', dest="REMOVE", help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
-            parser.add_argument('--type', action='store', dest="TYPE", type=str, default = None, help='Type of job (Backup, Archive, etc. DEFAULT: Backup')
-            parser.add_argument('--level', action='store', dest="LEVEL", type=str, default = None, help='Type of job (Full, Incremental, Differential. DEFAULT: Full')
-            parser.add_argument('--pool', action='store', dest="POOL", type=str, default = None, help='Which storage pool to use. DEFAULT: <Same as level>')
-            parser.add_argument('--client', action='store', dest="CLIENT", type=str, default = None, help='The backup client. DEFAULT: phobos-fd')
-            parser.add_argument('--schedule', action='store', dest="SCHEDULE", type=str, default = None, help='Set the scheduling (for jobdefs only)')
-            parser.add_argument('--storage', action='store', dest="STORAGE", type=str, default = None, help='Set the storage medium. DEFAULT: Tape')
-            parser.add_argument('--messages', action='store', dest="MESSAGES", type=str, default = None, help='Messages setting for jobdefs.')
-            parser.add_argument('--priority', action='store', dest="PRIORITY", type=int, default = None, help='Priority setting for jobdefs.')
-            parser.add_argument('--bootstrap', action='store', dest="BOOTSTRAP", type=str, default = None,help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
-            parser.add_argument('--fullbackuppool', action='store', dest="FULLBACKUPPOOL", type=str, default = None, help='The generic "Full" backup pool.')
-            parser.add_argument('--diffbackuppool', action='store', dest="DIFFBACKUPPOOL", type=str, default = None, help='The generic "Differential" backup pool.')
-            parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = None, help='The generic "Incremental" backup pool.')
+            parser.add_argument('--generate', action='store_true', dest="generate", help='Create the necessary files with in director. Must be accompanied by an appropriate task type (I.e. --generate --jobdefs --directory /gen/jobdef/files/FOR/this/dir).')
+            parser.add_argument('--remove', action='store_true', dest="remove", help='Remove created files with in director. Must be accompanied by an appropriate task type (I.e. --remove --jobdefs --directory /remove/jobdef/files/FOR/this/dir).')
+            parser.add_argument('--jobtype', action='store', dest="jobtype", type=str, default = None, help='Type of job (Backup, Archive, etc. DEFAULT: Backup')
+            parser.add_argument('--level', action='store', dest="level", type=str, default = None, help='Type of job (Full, Incremental, Differential. DEFAULT: Full')
+            parser.add_argument('--pool', action='store', dest="pool", type=str, default = None, help='Which storage pool to use. DEFAULT: <Same as level>')
+            parser.add_argument('--client', action='store', dest="client", type=str, default = None, help='The backup client. DEFAULT: phobos-fd')
+            parser.add_argument('--schedule', action='store', dest="schedule", type=str, default = None, help='Set the scheduling (for jobdefs only)')
+            parser.add_argument('--storage', action='store', dest="storage", type=str, default = None, help='Set the storage medium. DEFAULT: Tape')
+            parser.add_argument('--messages', action='store', dest="messages", type=str, default = None, help='Messages setting for jobdefs.')
+            parser.add_argument('--priority', action='store', dest="priority", type=int, default = None, help='Priority setting for jobdefs.')
+            parser.add_argument('--bootstrap', action='store', dest="bootstrap", type=str, default = None,help='bootstrap for jobdefs. DEFAULT: "/var/lib/bareos/%c.bsr".')
+            parser.add_argument('--fullbackuppool', action='store', dest="fullbackuppool", type=str, default = None, help='The generic "Full" backup pool.')
+            parser.add_argument('--diffbackuppool', action='store', dest="diffbackuppool", type=str, default = None, help='The generic "Differential" backup pool.')
+            parser.add_argument('--incbackuppool', action='store', dest="incbackuppool", type=str, default = None, help='The generic "Incremental" backup pool.')
+            parser.add_argument('--excludedircontaining', action='store', dest="excdircontaining", type=str, default = None, help='When set to a string, any directory containing a filename that matches <str> will be excluded from the backup. (DEFAULT: .nobackup)')
             
         super().__init__(parser, args, kwargs)
 
         # Always set the defaults via the @property
-        self.backup_type    = self.kwargs.get("TYPE",            None) 
-        self.level          = self.kwargs.get("LEVEL",           None) 
-        self.pool           = self.kwargs.get("POOL",            None) 
-        self.client         = self.kwargs.get("CLIENT",          None) 
-        self.schedule       = self.kwargs.get("SCHEDULE",        None) 
-        self.storage        = self.kwargs.get("STORAGE",         None) 
-        self.messages       = self.kwargs.get("MESSAGES",        None) 
-        self.priority       = self.kwargs.get("PRIORITY",        None) 
-        self.bootstrap      = self.kwargs.get("BOOTSTRAP",       None) 
-        self.fullbackuppool = self.kwargs.get("FULLBACKUPPOOL",  None) 
-        self.diffbackuppool = self.kwargs.get("DIFFBACKUPPOOL",  None) 
-        self.incbackuppool  = self.kwargs.get("INCBACKUPPOOL",   None) 
-        self.generate       = self.kwargs.get("GENERATE",        False) 
-        self.remove         = self.kwargs.get("REMOVE",          False) 
+        self.backup_type    = self.kwargs.get("jobtype",            None) 
+        self.level          = self.kwargs.get("level",           None) 
+        self.pool           = self.kwargs.get("pool",            None) 
+        self.client         = self.kwargs.get("client",          None) 
+        self.schedule       = self.kwargs.get("schedule",        None) 
+        self.storage        = self.kwargs.get("storage",         None) 
+        self.messages       = self.kwargs.get("messages",        None) 
+        self.priority       = self.kwargs.get("priority",        None) 
+        self.bootstrap      = self.kwargs.get("bootstrap",       None) 
+        self.fullbackuppool = self.kwargs.get("fullbackuppool",  None) 
+        self.diffbackuppool = self.kwargs.get("diffbackuppool",  None) 
+        self.incbackuppool  = self.kwargs.get("incbackuppool",   None) 
+        self.generate       = self.kwargs.get("generate",        False) 
+        self.remove         = self.kwargs.get("remove",          False) 
+        self.excdircontaining = self.kwargs.get("excdircontaining", None) 
         
         self.main()
                 
@@ -695,6 +735,27 @@ class DirectorTools(ABC_bareos):
     @diffbackuppool.deleter
     def diffbackuppool(self):
         del self.DIFFBACKUPPOOL
+
+# parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = "Incremental", help='The generic "Incremental" backup pool.')
+
+    @property
+    def excdircontaining(self):
+        try: return self.EXCDIRCONTAINING 
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.info(err)
+            raise ValueError(err)
+        
+    @excdircontaining.setter
+    def excdircontaining(self, value):
+        if value is None: value = ".nobackup"
+        _value = str(value)
+        # Assume OK. Maybe validate later using pybareos or something
+        self.EXCDIRCONTAINING = _value
+        
+    @excdircontaining.deleter
+    def excdircontaining(self):
+        del self.EXCDIRCONTAINING
 
 # parser.add_argument('--incbackuppool', action='store', dest="INCBACKUPPOOL", type=str, default = "Incremental", help='The generic "Incremental" backup pool.')
 
@@ -950,7 +1011,8 @@ class DirectorTools(ABC_bareos):
             
             _template = fileset_template.format(
                         NAME  = _name,
-                        FILES =''.join(["    File = \"", dir,  self.symlinks, "\""])
+                        FILES =''.join(["    File = \"", dir,  self.symlinks, "\""]),
+                        EXCDIRCONTAINING = self.excdircontaining
                         )
             
             msg = "Creating: '{F}'".format(F = _filename)

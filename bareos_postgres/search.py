@@ -33,13 +33,13 @@ class Search():
         if isinstance(parser, ArgumentParser):
             ### SET ARGPARSE OPTIONS HERE #####################################
             ### ALWAYS SET DEFAULTS THROUGH AN @property ######################
-            parser.add_argument('--out',     '-o', action="store", dest="output",         type=str, help='FULL PATH to output filename')
-            parser.add_argument('--user','-U',     action="store", dest="user",           type=str, help='Bareos Database Password')
-            parser.add_argument('--password','-P', action="store", dest="password",       type=str, help='Bareos Database Password')
-            parser.add_argument('--logfile',     '-L', action="store", dest="logfile",    type=str, help='Logfile file name or full path.\nDEFAULT: ./classname.log')
-            parser.add_argument('--loglevel',   '-l', action="store", dest="loglevel",    type=str, help='Logging level.\nDEFAULT: 10.')
-            parser.add_argument('--screendump',  '-S', action="store", dest="screendump", type=str,  help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
-            parser.add_argument('--createpaths','-C', action="store", dest="createpaths", type=str, help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
+            parser.add_argument('--out',        '-o', action="store", dest="output",     type=str, help='FULL PATH to output filename')
+            parser.add_argument('--user',       '-U', action="store", dest="user",       type=str, help='Bareos Database Username')
+            parser.add_argument('--password',   '-P', action="store", dest="password",   type=str, help='Bareos Database Password')
+            parser.add_argument('--logfile',    '-L', action="store", dest="logfile",    type=str, help='Logfile file name or full path.\nDEFAULT: ./classname.log')
+            parser.add_argument('--loglevel',   '-l', action="store", dest="loglevel",   type=str, help='Logging level.\nDEFAULT: 10.')
+            parser.add_argument('--screendump', '-S', action="store", dest="screendump", type=str, help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
+            parser.add_argument('--createpaths','-C', action="store", dest="createpaths",type=str, help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
 
             parser_kwargs = parser.parse_args()
             kwargs.update(vars(parser_kwargs))
