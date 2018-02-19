@@ -33,7 +33,7 @@ class Search():
         if isinstance(parser, ArgumentParser):
             ### SET ARGPARSE OPTIONS HERE #####################################
             ### ALWAYS SET DEFAULTS THROUGH AN @property ######################
-            parser.add_argument('--out',        '-o', action="store", dest="output",     type=str, help='FULL PATH to output filename')
+            parser.add_argument('--outfile',    '-o', action="store", dest="outfile",     type=str, help='FULL PATH to outfile filename')
             parser.add_argument('--user',       '-U', action="store", dest="user",       type=str, help='Bareos Database Username')
             parser.add_argument('--password',   '-P', action="store", dest="password",   type=str, help='Bareos Database Password')
             parser.add_argument('--logfile',    '-L', action="store", dest="logfile",    type=str, help='Logfile file name or full path.\nDEFAULT: ./classname.log')
@@ -78,7 +78,7 @@ class Search():
             ### ALWAYS SET DEFAULTS THROUGH AN @property ######################
         self.user       = kwargs.get("user", None)
         self.password   = kwargs.get("password", None)
-        self.output     = kwargs.get("output", None)
+        self.outfile     = kwargs.get("outfile", None)
         
         atexit.register(self._cleanup)
     
@@ -225,12 +225,13 @@ class Search():
     def outfile(self):
         try: return self.OUTFILE
         except (AttributeError, KeyError, ValueError) as e:
-            self.OUTFILE = "/beegfs/scratch/bareos-restores/bareos.file_locations.tmp"
-            return self.OUTFILE         
+            err = "Attribute {A} is not set and cannot be null. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
 
     @outfile.setter
     def outfile(self, value):
-        if value is None: self.OUTFILE = "/beegfs/scratch/bareos-restores/bareos.file_locations.tmp"
+        if value is None: self.OUTFILE = "/beegfs/prj/bareos_iventory/inventory.csv"
         self.OUTFILE = str(value)
                     
     @outfile.deleter
@@ -241,6 +242,7 @@ class Search():
         """"""
         conn = Connect(password  = self.password)
         paths = conn.meta.tables['path']
+        log.info("Writing to: '{F}'".format(F = str(self.outfile)))
         FH = open(self.outfile, "w")
 #         FH.write(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') + "\n")
         
