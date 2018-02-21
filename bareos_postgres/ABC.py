@@ -21,23 +21,30 @@ import abc
 import inspect
 import ntpath
 import os
+import sqlalchemy
+import sys
+
 
 class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
     def __init__(self, parser = {}, *args, **kwargs):
-#         self._set_config(parser, args, kwargs) # NEVER REMOVE
         self.app_name = self.__class__.__name__
-#         self.CONF   = ConfigHandler()# ConfigHandler disabled until py3 update        # Convert parsed args to dict and add to kwargs
         if isinstance(parser, ArgumentParser):
-            ### SET ARGPARSE OPTIONS HERE #####################################
+            ### SET ALL ARGPARSE OPTIONS HERE #################################
             ### ALWAYS SET DEFAULTS THROUGH AN @property ######################
             parser.add_argument('--logfile',     '-L', action="store", dest="logfile",    type=str, help='Logfile file name or full path.\nDEFAULT: ./classname.log')
-            parser.add_argument('--loglevel',   '-l', action="store", dest="loglevel",   type=str, help='Logging level.\nDEFAULT: 10.')
-            parser.add_argument('--screendump',  '-S', action="store", dest="screendump", type=str,  help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
-            parser.add_argument('--createpaths','-C', action="store", dest="createpaths",type=str, help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
+            parser.add_argument('--loglevel',    '-E', action="store", dest="loglevel",   type=str, help='Logging level.\nDEFAULT: 10.')
+            parser.add_argument('--screendump',  '-S', action="store", dest="screendump", type=str, help='For logging only. If "True" all logging info will also be dumped to the terminal.\nDEFAULT: True.')
+            parser.add_argument('--createpaths', '-C', action="store", dest="createpaths",type=str, help='For logging only. If "True" will create all paths and files (example create a non-existent logfile.\nDEFAULT: True')
+            parser.add_argument('--user',        '-U', action="store", dest="user",       type=str, default = None, help="Database User for accessing the Bareos Postgres database. (DEFAULT: 'bareospostgresro')")
+            parser.add_argument('--password',    '-W', action="store", dest="password",   type=str, default = None, help="Database User's Password for accessing the Bareos Postgres database. (DEFAULT: 'None')")
+            parser.add_argument('--host',        '-H', action="store", dest="host",       type=str, default = None, help="Host for accessing the Bareos Postgres database. (DEFAULT: 'localhost')")
+            parser.add_argument('--port',        '-P', action="store", dest="port",       type=str, default = None, help="Port for accessing the Bareos Postgres database. (DEFAULT: '5432')")
+            parser.add_argument('--database',    '-D', action="store", dest="database",   type=str, default = None, help="Bareos Postgres database name to which to connect. (DEFAULT: 'bareos')")
+            parser.add_argument('--outfile',     '-o', action="store", dest="outfile",     type=str,help='FULL PATH to outfile filename')
 
             parser_kwargs = parser.parse_args()
             kwargs.update(vars(parser_kwargs))
-
+            
         elif isinstance(parser, dict):
             kwargs.update(parser)
             
@@ -49,7 +56,7 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
         self.parser = parser
         self.args   = args
         self.kwargs = kwargs         
-        
+
         # # Here we parse out any args and kwargs that are not needed within the self or self.CONF objects
         # # if "flag" in args: self.flag = something
         ### ALWAYS SET DEFAULTS IN @property #################################
@@ -61,7 +68,7 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
         #=== loghandler bugfix in Jessie access to self.socket.send(msg)
         # Only use actual filesystem file for log for now
         # Log something
-        log.debug("Starting  {C}...".format(C = self.app_name), 
+        log.info("Starting  {C}...".format(C = self.app_name), 
                  app_name     = self.app_name,
                  logfile      = self.logfile, 
                  log_level    = self.log_level, 
@@ -70,7 +77,13 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
                  )
         # Start params here
             ### ALWAYS SET DEFAULTS THROUGH AN @property ######################
-            
+        self.user       = kwargs.get("user",      None)
+        self.password   = kwargs.get("password" , None)
+        self.host       = kwargs.get("host" ,     None)
+        self.port       = kwargs.get("port" ,     None)
+        self.database   = kwargs.get("database" , None)
+        self.outfile    = kwargs.get("outfile", None)
+                            
     @property
     def logfile(self):
         try: return self.LOGFILE
@@ -105,16 +118,17 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
         
     @log_level.setter
     def log_level(self, value):
-        if value is None: value = 10
         try: self.LOGLEVEL = int(value)
         except (ValueError, TypeError):
-            _value = str(value).upper()
-            if   "CRIT"   in _value: self.LOGLEVEL = 50
-            elif "ERR"    in _value: self.LOGLEVEL = 40
-            elif "WARN"   in _value: self.LOGLEVEL = 30
-            elif "INF"    in _value: self.LOGLEVEL = 20
-            elif "D"      in _value: self.LOGLEVEL = 10
-            elif "N"      in _value: self.LOGLEVEL = 0
+            _value = str(value).upper().strip()
+            if   _value.startswith("CRIT"): self.LOGLEVEL = 50
+            elif _value.startswith("ERR" ): self.LOGLEVEL = 40
+            elif _value.startswith("WARN"): self.LOGLEVEL = 30
+            elif _value.startswith("INF" ):  self.LOGLEVEL = 20
+            elif _value.startswith("D"   ): self.LOGLEVEL = 10
+            elif _value.startswith("N"   ): self.LOGLEVEL = 10
+            elif _value.startswith("F"   ): self.LOGLEVEL = 0
+            elif _value.startswith("Z"   ): self.LOGLEVEL = 0
             else:
                 err = "Unable to determine log level value from'{V}'".format(str(value))
                 raise ValueError(err)
@@ -133,9 +147,12 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
         
     @screendump.setter
     def screendump(self, value):
-        if value is None: value = None
-        if value:   self.SCREENDUMP = True
-        else:       self.SCREENDUMP = False
+        _value = str(value).upper().strip()
+        if   len(_value) < 1:       self.SCREENDUMP = False
+        if   _value.startswith("N"): self.SCREENDUMP = False
+        elif _value.startswith("F"): self.SCREENDUMP = False
+        else:
+            self.SCREENDUMP = True
                     
     @screendump.deleter
     def screendump(self):
@@ -151,10 +168,13 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
         
     @create_paths.setter
     def create_paths(self, value):
-        if value is None: value = True
-        if value:   self.CREATEPATHS = True
-        else:       self.CREATEPATHS = False
-                    
+        _value = str(value).upper().strip()
+        if   len(_value) < 1:       self.CREATEPATHS = False
+        if   _value.startswith("N"): self.CREATEPATHS = False
+        elif _value.startswith("F"): self.CREATEPATHS = False
+        else:
+            self.CREATEPATHS = True
+
     @create_paths.deleter
     def create_paths(self):
         del self.SCREENDUMP
@@ -165,3 +185,222 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
 #     parser = ArgumentParser()
 #     object = ClassName(parser)
 #===============================================================================
+
+    @property
+    def user(self):
+        try: return self.USER
+        except (AttributeError, KeyError, ValueError) as e:
+            self.USER = "postgres"
+            return self.USER 
+        
+    @user.setter
+    def user(self, value):
+        if value is None: value = "postgres"
+        self.USER = str(value)
+                    
+    @user.deleter
+    def user(self):
+        del self.USE
+
+    @property
+    def password(self):
+        try: return self.PWD
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set and cannot be null. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @password.setter
+    def password(self, value):
+        if value is None:
+            err = "Password parameter cannot be blank. (password = '{V}')".format(V = str(value))
+        self.PWD = str(value)
+                    
+    @password.deleter
+    def password(self):
+        del self.PWD
+
+    @property
+    def outfile(self):
+        try: return self.OUTFILE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set and cannot be null. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+
+    @outfile.setter
+    def outfile(self, value):
+        if value is None: self.OUTFILE = "/beegfs/prj/bareos_iventory/inventory.csv"
+        self.OUTFILE = str(value)
+                    
+    @outfile.deleter
+    def outfile(self):
+        del self.OUTFIL            
+
+    @property
+    def user(self):
+        try:
+            return self.USER
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @user.setter
+    def user(self, value):
+        if value is None: value = "bareospostgresro"
+        _value = str(value)
+        # Do checks and such here
+        if (not _value):
+            err = "Attribute '{A} = {V}' does not appear to be valid.".format(A = str(stack()[0][3]), V = _value)
+            log.error(err)
+            raise ValueError(err)
+        else:
+            self.USER = _value
+    
+    @user.deleter
+    def user(self):
+        del self.USER        
+        
+    @property
+    def password(self):
+        try:
+            return self.PWD
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @password.setter
+    def password(self, value):
+        if value is None: value = ""
+        _value = str(value)
+        # Do checks and such here
+        if (not _value):
+            err = "Attribute '{A} = {V}' does not appear to be valid.".format(A = str(stack()[0][3]), V = _value)
+            log.error(err)
+            raise ValueError(err)
+        else:
+            self.PWD = _value
+    
+    @password.deleter
+    def password(self):
+        del self.PWD
+
+    @property
+    def host(self):
+        try:
+            return self.HOST
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @host.setter
+    def host(self, value):
+        if value is None: value = "localhost"
+        _value = str(value)
+        # Do checks and such here
+        if (not _value):
+            err = "Attribute '{A} = {V}' does not appear to be valid.".format(A = str(stack()[0][3]), V = _value)
+            log.error(err)
+            raise ValueError(err)
+        else:
+            self.HOST = _value
+    
+    @host.deleter
+    def host(self):
+        del self.HOST
+
+    @property
+    def port(self):
+        try:
+            return self.PORT
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @port.setter
+    def port(self, value):
+        if value is None: value = "5432"
+        _value = str(value)
+        # Do checks and such here
+        if (not _value):
+            err = "Attribute '{A} = {V}' does not appear to be valid.".format(A = str(stack()[0][3]), V = _value)
+            log.error(err)
+            raise ValueError(err)
+        else:
+            self.PORT = _value
+    
+    @port.deleter
+    def port(self):
+        del self.PORT
+
+    @property
+    def database(self):
+        try:
+            return self.DATABASE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+        
+    @database.setter
+    def database(self, value):
+        if value is None: value = "bareos"
+        _value = str(value)
+        # Do checks and such here
+        if (not _value):
+            err = "Attribute '{A} = {V}' does not appear to be valid.".format(A = str(stack()[0][3]), V = _value)
+            log.error(err)
+            raise ValueError(err)
+        else:
+            self.DATABASE = _value
+    
+    @database.deleter
+    def database(self):
+        del self.DATABASE
+
+    @property        
+    def engine(self):
+        try: return self.ENGINE
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. Try the 'connection' method. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)
+                
+    @engine.setter
+    def engine(self, value):
+        if isinstance(value, sqlalchemy.engine.base.Engine):
+            self.ENGINE = value
+
+        else:
+                err = "Value '{V}'does not appear to be a valid 'sqlalchemy.engine.base.Engine' object".format(V = type(value)) 
+                log.error(err)
+                raise ValueError(err)
+
+    @engine.deleter
+    def engine(self):
+        del self.ENGINE
+            
+    @property        
+    def meta(self):
+        try: return self.META
+        except (AttributeError, KeyError, ValueError) as e:
+            err = "Attribute {A} is not set. Try the 'connection' method. ".format(A = str(stack()[0][3]))
+            log.error(err)
+            raise ValueError(err)                        
+
+    @meta.setter
+    def meta(self, value):
+        if isinstance(value, sqlalchemy.sql.schema.MetaData):
+            self.META = value
+        else:
+                err = "Value '{V}'does not appear to be a valid 'sqlalchemy.sql.schema.MetaData' object".format(V = type(value)) 
+                log.error(err)
+                raise ValueError(err)
+
+    @meta.deleter
+    def meta(self):
+        del self.META
