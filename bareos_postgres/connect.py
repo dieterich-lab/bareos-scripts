@@ -17,12 +17,13 @@ _delim = checks.directory_deliminator()
 obfpwd = checks.obfuscate_key # Setting as an method object
 from common.loghandler import log
 from inspect import stack
+from sqlalchemy import exc as sa_exc        
 
 import inspect
 import ntpath
 import os
 import sqlalchemy
-        
+import warnings
 
 class Connect(Bareos_postgres_ABC):
     """
@@ -92,12 +93,13 @@ class Connect(Bareos_postgres_ABC):
                                                                                                                                                 )
             log.error(err)
             raise RuntimeError(err)
-
-        try: self.meta =sqlalchemy.MetaData(bind=self.engine, reflect=True)
-        except Exception as e:
-            err = "Unable to create Postgres Meta object from SQLAlchemy engine '{E}'".format( E = str(self.engine))
-            log.error(err)
-            raise RuntimeError(err)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=sa_exc.SAWarning)
+            try: self.meta =sqlalchemy.MetaData(bind=self.engine, reflect=True)
+            except Exception as e:
+                err = "Unable to create Postgres Meta object from SQLAlchemy engine '{E}'".format( E = str(self.engine))
+                log.error(err)
+                raise RuntimeError(err)
             
     def execute(self, *args, **kwargs):
         self.ENGINE(args, kwargs)
