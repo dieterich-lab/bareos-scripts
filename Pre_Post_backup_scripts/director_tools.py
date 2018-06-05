@@ -40,7 +40,7 @@ JobDefs {{
   Pool = {POOL}
   Client = {CLIENT}
   FileSet = "{FILESET}"
-  # Schedule = "{SCHEDULE}"
+  Schedule = "{SCHEDULE}"
   Storage = {STORAGE}
   Messages = {MESSAGES}
   Priority = {PRIORITY}
@@ -594,7 +594,10 @@ class DirectorTools(ABC_bareos):
 
         # Always set the defaults via the @property
         self.backup_type    = self.kwargs.get("jobtype",            None) 
-        self.level          = self.kwargs.get("level",           None) 
+        self.fullbackuppool = self.kwargs.get("fullbackuppool",  None) # Needs to come before level
+        self.diffbackuppool = self.kwargs.get("diffbackuppool",  None) # Needs to come before level
+        self.incbackuppool  = self.kwargs.get("incbackuppool",   None) # Needs to come before level
+        self.level          = self.kwargs.get("level",           None) # Level needs to come before pool
         self.pool           = self.kwargs.get("pool",            None) 
         self.client         = self.kwargs.get("client",          None) 
         self.schedule       = self.kwargs.get("schedule",        None) 
@@ -602,9 +605,6 @@ class DirectorTools(ABC_bareos):
         self.messages       = self.kwargs.get("messages",        None) 
         self.priority       = self.kwargs.get("priority",        None) 
         self.bootstrap      = self.kwargs.get("bootstrap",       None) 
-        self.fullbackuppool = self.kwargs.get("fullbackuppool",  None) 
-        self.diffbackuppool = self.kwargs.get("diffbackuppool",  None) 
-        self.incbackuppool  = self.kwargs.get("incbackuppool",   None) 
         self.generate       = self.kwargs.get("generate",        False) 
         self.remove         = self.kwargs.get("remove",          False) 
         self.excdircontaining = self.kwargs.get("excdircontaining", None) 
@@ -720,9 +720,10 @@ class DirectorTools(ABC_bareos):
     def diffbackuppool(self):
         try: return self.DIFFBACKUPPOOL
         except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
+            err = "Attribute {A} is not set. Using default setting.".format(A = str(stack()[0][3]))
+            log.warning(err)
+            self.diffbackuppool = None
+            return self.DIFFBACKUPPOOL
 #             return False
         
     @diffbackuppool.setter
@@ -763,9 +764,11 @@ class DirectorTools(ABC_bareos):
     def fullbackuppool(self):
         try: return self.FULLBACKUPPOOL
         except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
+            err = "Attribute {A} is not set. Using default setting.".format(A = str(stack()[0][3]))
+            log.warning(err)
+            self.fullbackuppool = None
+            return self.FULLBACKUPPOOL
+#             raise ValueError(err)
 #             return False
         
     @fullbackuppool.setter
@@ -809,9 +812,10 @@ class DirectorTools(ABC_bareos):
     def incbackuppool(self):
         try: return self.INCBACKUPPOOL
         except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
+            err = "Attribute {A} is not set. Using default setting.".format(A = str(stack()[0][3]))
+            log.warning(err)
+            self.incbackuppool = None
+            return self.INCBACKUPPOOL
 #             return False
         
     @incbackuppool.setter
@@ -829,9 +833,11 @@ class DirectorTools(ABC_bareos):
     def level(self):
         try: return self.LEVEL
         except (AttributeError, KeyError, ValueError) as e:
-            err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
-            log.info(err)
-            raise ValueError(err)
+            err = "Attribute {A} is not set. Using default setting.".format(A = str(stack()[0][3]))
+            log.warning(err)
+            self.level = None
+            return self.LEVEL
+#             raise ValueError(err)
 #             return False
         
     @level.setter
@@ -901,13 +907,23 @@ class DirectorTools(ABC_bareos):
         except (AttributeError, KeyError, ValueError) as e:
             err = "Attribute {A} is not set. ".format(A = str(stack()[0][3]))
             log.info(err)
-            raise ValueError(err)
+#             raise ValueError(err)
+            self.pool = None
+            return self.POOL
 #             return False
         
     @pool.setter
     def pool(self, value):
         if value is None:
-            try:  value = self.LEVEL
+            try:  
+                if   "full" in self.level.lower(): value = self.fullbackuppool 
+                elif "dif"  in self.level.lower(): value = self.diffbackuppool 
+                elif "inc"  in self.level.lower(): value = self.incbackuppool
+                else:
+                    err = "DirectorTools.pool.setter: Unable to match 'level' param to 'pool' param."
+                    log.error(err)
+                    raise RuntimeError(err)
+                 
             except AttributeError as e:
                 err = "Unable to set determine the value for {A} from either passed in value '{V}' or the parameter '--type'. ".format(A = str(stack()[0][3]), V = str(value))
         _value = str(value)
