@@ -101,7 +101,8 @@ class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
         _basefilename, _ext = os.path.splitext(_file)
         # Do checks and such here
         if (_dir == "") or (_dir.startswith(".")): _dir = os.getcwd() + _delim
-        _value = _dir + _file 
+        _value = os.path.join(_dir,_file) 
+#         _value = _dir + _file 
         self.LOGFILE = _value
     
     @logfile.deleter
