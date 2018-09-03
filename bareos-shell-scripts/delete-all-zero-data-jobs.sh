@@ -1,7 +1,6 @@
 #!/bin/bash
 
 scriptname=`basename "$0"`
-exec 2> /dev/null # Redirect error out, to avoid errors while parsing input
 
 ### USAGE ######################################################################
 read -r -d '' USAGE << ENDOFUSAGE
@@ -12,6 +11,8 @@ ${scriptname}  -i -L -T -v
         A     Canceled by the user
         T     Terminated normally
         W     Terminated with warnings
+
+    FULL BACKUPS are always ignored.
 
     -h | --help
         Print this help statement.
@@ -61,6 +62,8 @@ while true; do
       * )                                                           break ;;
   esac
 done
+
+exec 2> /dev/null # Redirect error out, to avoid errors while parsing input
 
 #--- FUNCTIONS --------------------------------------------------------------
 # None
