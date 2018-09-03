@@ -966,7 +966,7 @@ class DirectorTools(ABC_bareos):
         
     @schedule.setter
     def schedule(self, value):
-        if value is None: value = "RegularBackups-Full"
+        if value is None: value = "RegularBackups"
         _value = str(value)
         # Assume OK. Maybe validate later using pybareos or something
         self.SCHEDULE = _value
