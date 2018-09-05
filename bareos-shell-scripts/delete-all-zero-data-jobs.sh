@@ -12,7 +12,7 @@ ${scriptname}  -i -L -T -v
         T     Terminated normally
         W     Terminated with warnings
 
-    FULL BACKUPS are always ignored.
+    FULL BACKUPS are always ignored. 
 
     -h | --help
         Print this help statement.
@@ -122,7 +122,7 @@ do
                 response=$(echo "list jobid=${JOBID}" | bconsole | grep '^\+|\|')
                 output=$( echo "${response}" | grep -P "^[\+\|].*" )
                 echo "${output}"
-                echo -n "Delete this job?"
+                echo -n "Delete this job?(Tap the single key 'y' or 'n')"
                 read -n 1 yn </dev/tty
                 echo
                 case $yn in
@@ -153,4 +153,4 @@ do
     fi
 done <<< "$(echo "list jobs" | bconsole )"
 
-[[ ${VERBOSE} == true ]] && [[ $? == 0 ]] && echo "OK" || echo "FAILED!"
+echo "DONE"
