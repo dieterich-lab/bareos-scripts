@@ -37,16 +37,18 @@ class Search(Bareos_postgres_ABC):
         This class searches the Bareos Postgres database for files that have 
         been backed up. 
         
-        THIS IS MOSTLY A PLACEHOLDER FOR NOW: 
         
-        Currently running the search.py will only dump the backed up files out
-        as an inventory file. 
+        Currently running the search.py will only dump the backed up 
+        files out as an inventory file.But eventually, this script 
+        needs to be modified to include a "--grep" option which can be 
+        used by users to search the database and return matching backup 
+        information. It should also be usable as a class within other 
+        Python scripts. 
         
-        Eventually, this script needs to be modified to include a "--grep"
-        string which will search the database and return the results.
+        A switch "--dump" should be added to differentiate between a 
+        "search" and just dumping the entire inventory out. 
         
-        A switch "--dump" should also be added to allow for the entire filebase 
-        to be dumped to the output file.  
+        An actual "Search" should then become the default.   
          
     :METHODS:
         None
@@ -126,28 +128,6 @@ class Search(Bareos_postgres_ABC):
         FH = open(_tmpfile, "w")
 #         FH.write(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') + "\n")
         
-#===============================================================================
-#         nullnames = 0
-#         for file in conn.ENGINE.execute("SELECT jobid, pathid, name FROM file"):
-#             pathid = file[1]
-#             jobid  = file[0]
-#             name   = file[2]
-#         
-#             if len(name) < 1:
-#                 nullnames += 1
-#                 continue
-#             else:
-#                 if nullnames > 0: log.debug("Skipped {N} null filenames.".format(N = str(nullnames)))
-#                 nullnames = 0
-#         
-#             path     = conn.ENGINE.execute("SELECT path FROM path WHERE pathid = {P}".format(P = str(pathid))).fetchone()[0]
-#             _startend = conn.ENGINE.execute("SELECT starttime, realendtime FROM job WHERE jobid = {J}".format(J = str(jobid))).fetchone()
-#             _start = _startend[0].strftime('%Y-%m-%d') 
-# #             _end   = _startend[1].strftime('%Y-%m-%d')
-# #             startend = ''.join([_start, "-", _end])
-#             line = ''.join([str(jobid), ":", _start, ":", str(path) + str(name)])
-# #             print(line) #333
-#===============================================================================
         _sql = """SELECT file.jobid, job.starttime, path.path, file.name   
                   FROM file 
                   JOIN path ON file.pathid=path.pathid 

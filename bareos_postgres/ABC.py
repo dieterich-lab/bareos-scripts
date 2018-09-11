@@ -26,6 +26,17 @@ import sys
 
 
 class Bareos_postgres_ABC(metaclass=abc.ABCMeta):
+    """
+    :NAME:
+        Bareos_postgres_ABC()
+        
+    :DESCRIPTION:
+        The abstract class for Python Bareos Postgres tools.
+        
+        Predominately, this just handles all the @properties for the 
+        connecting the Bareos postgres database.   
+        
+            """
     def __init__(self, parser = {}, *args, **kwargs):
         self.app_name = self.__class__.__name__
         if isinstance(parser, ArgumentParser):
